@@ -1,0 +1,6 @@
+{
+  "name": "SalaryFlow - Global HR & Payroll",
+  "description": "Multi-country payroll and compensation management demo for United States and India with localized statutory deductions, register calculations, and payslip generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
