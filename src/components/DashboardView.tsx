@@ -19,7 +19,9 @@ import {
   Check,
   CalendarDays,
   RotateCcw,
-  X
+  X,
+  DollarSign,
+  UserCheck
 } from 'lucide-react';
 import {
   AreaChart,
@@ -41,7 +43,8 @@ interface DashboardViewProps {
   activities: ActivityItem[];
   onSelectEmployee: (emp: Employee) => void;
   onPageChange: (page: number) => void;
-  onRunPayroll: () => void;
+  onRunPayroll?: () => void;
+  onViewEmployees?: () => void;
   onStartCountryPayroll?: (country: 'US' | 'IN') => void;
   onViewReports?: () => void;
   currentPage: number;
@@ -76,6 +79,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectEmployee,
   onPageChange,
   onRunPayroll,
+  onViewEmployees,
   onStartCountryPayroll,
   onViewReports,
   currentPage,
@@ -350,8 +354,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const countryLabel = selectedCountry === 'all'
     ? 'All Entities'
     : selectedCountry === 'US'
-    ? 'United States'
-    : 'India';
+      ? 'United States'
+      : 'India';
 
   return (
     <motion.div
@@ -432,7 +436,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {/* Date / Calendar Filter: Month and Year Selection Only */}
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs">
               <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
-              
+
               {/* Month Selector */}
               <select
                 value={selectedMonth}
@@ -505,8 +509,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {selectedCountry === 'IN'
               ? formatCurrency(calculatedPayrollIN_INR, 'INR')
               : selectedCountry === 'US'
-              ? formatCurrency(calculatedPayrollUS, 'USD')
-              : formatCurrency(calculatedPayrollAll, 'USD')}
+                ? formatCurrency(calculatedPayrollUS, 'USD')
+                : formatCurrency(calculatedPayrollAll, 'USD')}
           </h3>
           <div className="flex items-center gap-1.5 mt-2.5 text-xs font-semibold text-emerald-600">
             <TrendingUp className="w-3.5 h-3.5" />
@@ -514,13 +518,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {selectedCountry === 'IN'
                 ? `≈ ${formatCurrency(calculatedPayrollIN_USD, 'USD')} USD`
                 : selectedCountry === 'US'
-                ? 'United States Entity'
-                : 'Multi-entity consolidated'}
+                  ? 'United States Entity'
+                  : 'Multi-entity consolidated'}
             </span>
           </div>
         </motion.div>
 
-        {/* Card 2: Total Global Workforce (EXPLICITLY KEPT STATIC as instructed: "except for the global workforce") */}
+        {/* Card 2: Total Global Workforce */}
         <motion.div
           variants={itemVariants}
           className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs relative transition hover:shadow-xs hover:border-slate-300"
@@ -539,78 +543,67 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </h3>
           <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-semibold">
             <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md text-[11px]">
-              🇺🇸 US: 31%
+              🇺🇸 US: 69%
             </span>
             <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md text-[11px]">
-              🇮🇳 India: 69%
+              🇮🇳 India: 31%
             </span>
           </div>
         </motion.div>
 
-        {/* Card 3: Upcoming / Selected Payroll Run Date (Calculated from selected Month & Year) */}
+        {/* Card 3: Average Monthly Salary */}
         <motion.div
           variants={itemVariants}
           className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs relative transition hover:shadow-xs hover:border-slate-300"
         >
           <div className="flex items-center justify-between mb-3">
             <div className="w-11 h-11 rounded-xl bg-indigo-500 text-white flex items-center justify-center shadow-xs">
-              <CalendarIcon className="w-5 h-5" />
+              <DollarSign className="w-5 h-5" />
             </div>
-            <span className={cn(
-              "text-[10px] font-bold px-2 py-0.5 rounded-full border",
-              isPastCycle
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-indigo-50 text-indigo-700 border-indigo-200"
-            )}>
-              {isPastCycle ? 'Disbursed' : 'Scheduled'}
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+              Active Baseline
             </span>
           </div>
-          <p className="text-xs font-medium text-slate-500">Payroll Cycle Close</p>
+          <p className="text-xs font-medium text-slate-500">Average Monthly Salary</p>
           <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">
-            {formattedCycleDate}
+            {selectedCountry === 'IN'
+              ? formatCurrency(Math.round(calculatedPayrollIN_INR / Math.max(1, (stats?.total_active_employees || 10000) * 0.31)), 'INR')
+              : selectedCountry === 'US'
+                ? formatCurrency(Math.round(calculatedPayrollUS / Math.max(1, (stats?.total_active_employees || 10000) * 0.69)), 'USD')
+                : formatCurrency(Math.round(calculatedPayrollAll / Math.max(1, (stats?.total_active_employees || 10000))), 'USD')}
           </h3>
           <div className="flex items-center gap-1.5 mt-2.5 text-xs font-semibold text-slate-500">
             <Clock className="w-3.5 h-3.5 text-indigo-500" />
-            <span>{currentMonthName} {selectedYear} Pay Cycle</span>
+            <span>Per employee across {countryLabel}</span>
           </div>
         </motion.div>
 
-        {/* Card 4: Tax & Statutory Deductions (Calculated for selected Country, Month & Year) */}
+        {/* Card 4: Employees Needing Review */}
         <motion.div
           variants={itemVariants}
           className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs relative transition hover:shadow-xs hover:border-slate-300"
         >
           <div className="flex items-center justify-between mb-3">
             <div className="w-11 h-11 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
-              <FileText className="w-5 h-5" />
+              <UserCheck className="w-5 h-5" />
             </div>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-              Statutory
+              Review Queue
             </span>
           </div>
-          <p className="text-xs font-medium text-slate-500">Tax & Statutory Deductions</p>
+          <p className="text-xs font-medium text-slate-500">Employees Needing Review</p>
           <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">
-            {selectedCountry === 'IN'
-              ? formatCurrency(calculatedDeductionsIN_INR, 'INR')
-              : selectedCountry === 'US'
-              ? formatCurrency(calculatedDeductionsUS, 'USD')
-              : formatCurrency(calculatedDeductionsAll, 'USD')}
+            {stats ? stats.pending_salaries_count.toLocaleString() : '142'} <span className="text-sm font-normal text-slate-500">Employees</span>
           </h3>
           <div className="flex items-center gap-1.5 mt-2.5 text-xs font-semibold text-slate-500">
-            <span>
-              {selectedCountry === 'IN'
-                ? 'EPF (12%) + TDS Withholding'
-                : selectedCountry === 'US'
-                ? 'IRS Federal + FICA (7.65%)'
-                : 'IRS W-2 + EPFO Compliant'}
-            </span>
+            <span>Eligible for periodic salary revision</span>
           </div>
         </motion.div>
       </div>
 
-      {/* 3. Multi-Country Operations Cards (Buttons Removed as requested) */}
+      {/* 3. Multi-Country Operations Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Country Hub 1: India (Start button removed) */}
+        {/* Country Hub 1: India */}
         <motion.div
           variants={itemVariants}
           className="bg-gradient-to-br from-white to-emerald-50/40 p-5 rounded-2xl border border-emerald-200/80 shadow-2xs hover:shadow-xs transition flex flex-col justify-between"
@@ -625,7 +618,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
               <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                69% of Workforce
+                31% of Workforce
               </span>
             </div>
 
@@ -633,7 +626,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
                 <span className="text-[10px] text-slate-400 font-semibold block uppercase">Headcount</span>
                 <span className="text-base font-bold font-mono text-slate-900">
-                  {stats ? Math.round((stats.total_active_employees || 10000) * 0.69).toLocaleString() : '6,900'}
+                  {stats ? Math.round((stats.total_active_employees || 10000) * 0.31).toLocaleString() : '3,100'}
                 </span>
               </div>
               <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
@@ -643,9 +636,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               </div>
               <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100 col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Statutory Deductions</span>
+                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Pay Structure</span>
                 <span className="text-xs font-bold text-slate-800">
-                  EPF (12%) + TDS
+                  Base + Allowances
                 </span>
               </div>
             </div>
@@ -654,15 +647,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="pt-3 border-t border-emerald-100/80 flex items-center justify-between">
             <span className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              {currentMonthName} {selectedYear} Direct Deposit Batch Ready
+              Monthly Compensation Cycle Active
             </span>
             <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-white border border-emerald-200 text-emerald-800 shadow-2xs">
-              NEFT &bull; RTGS Ready
+              EPFO Salary Tiers
             </span>
           </div>
         </motion.div>
 
-        {/* Country Hub 2: United States (Start button removed) */}
+        {/* Country Hub 2: United States */}
         <motion.div
           variants={itemVariants}
           className="bg-gradient-to-br from-white to-blue-50/40 p-5 rounded-2xl border border-blue-200/80 shadow-2xs hover:shadow-xs transition flex flex-col justify-between"
@@ -677,7 +670,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
               <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
-                31% of Workforce
+                69% of Workforce
               </span>
             </div>
 
@@ -685,7 +678,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100">
                 <span className="text-[10px] text-slate-400 font-semibold block uppercase">Headcount</span>
                 <span className="text-base font-bold font-mono text-slate-900">
-                  {stats ? Math.round((stats.total_active_employees || 10000) * 0.31).toLocaleString() : '3,100'}
+                  {stats ? Math.round((stats.total_active_employees || 10000) * 0.69).toLocaleString() : '6,900'}
                 </span>
               </div>
               <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100">
@@ -695,9 +688,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               </div>
               <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100 col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Statutory Deductions</span>
+                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Pay Structure</span>
                 <span className="text-xs font-bold text-slate-800">
-                  Fed + FICA (7.65%)
+                  Annual Base + Bonus
                 </span>
               </div>
             </div>
@@ -706,10 +699,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="pt-3 border-t border-blue-100/80 flex items-center justify-between">
             <span className="text-[11px] text-blue-700 font-semibold flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              {currentMonthName} {selectedYear} Direct Deposit Batch Ready
+              Standard Compensation Cycle Active
             </span>
             <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-white border border-blue-200 text-blue-800 shadow-2xs">
-              NACHA &bull; ACH Ready
+              USD Leveling Bands
             </span>
           </div>
         </motion.div>
@@ -809,7 +802,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         >
           <div className="flex items-center justify-between mb-2">
             <div>
-              <h4 className="font-bold text-slate-900 text-sm">Salary Breakdown</h4>
+              <h4 className="font-bold text-slate-900 text-sm">Compensation Composition</h4>
               <p className="text-[11px] text-slate-400">{countryLabel} &bull; {currentShortMonth} {selectedYear}</p>
             </div>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
@@ -838,7 +831,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </ResponsiveContainer>
             </div>
             <div className="absolute flex flex-col items-center justify-center text-center px-2">
-              <span className="text-[10px] font-medium text-slate-400">Net Disbursed</span>
+              <span className="text-[10px] font-medium text-slate-400">Total Base</span>
               <span className="text-xs font-extrabold text-slate-900 truncate max-w-[100px]">
                 {breakdownTotalFormatted}
               </span>
@@ -849,16 +842,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-slate-600">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                <span>Gross Salary</span>
+                <span>Base Salary (75%)</span>
               </div>
               <span className="font-semibold text-slate-800">
-                {formatCurrency(breakdownGross, breakdownCurrency)}
+                {formatCurrency(breakdownNet, breakdownCurrency)}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                <span>Deductions</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+                <span>Allowances & Benefits (15%)</span>
               </div>
               <span className="font-semibold text-slate-800">
                 {formatCurrency(breakdownDeductions, breakdownCurrency)}
@@ -867,10 +860,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-slate-600">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <span>Net Salary</span>
+                <span>Bonus Target & Merit (10%)</span>
               </div>
               <span className="font-semibold text-slate-800">
-                {formatCurrency(breakdownNet, breakdownCurrency)}
+                {formatCurrency(Math.round(breakdownNet * 0.12), breakdownCurrency)}
               </span>
             </div>
           </div>
@@ -931,7 +924,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <h4 className="font-bold text-slate-900 text-base">Employee Payroll</h4>
+              <h4 className="font-bold text-slate-900 text-base">Salary Review Register</h4>
               {isPageLoading && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-semibold animate-pulse">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
@@ -940,7 +933,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               )}
             </div>
             <p className="text-xs text-slate-400">
-              Monthly employee salary disbursement and attendance records (30 Days Cycle)
+              Active employee base compensation records and scheduled adjustments
             </p>
           </div>
 
@@ -963,17 +956,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               )}
             </button>
 
-            {/* CSV Export (Uses 30 Days) */}
+            {/* CSV Export */}
             <button
               type="button"
               onClick={() => {
-                const csvContent = "data:text/csv;charset=utf-8," 
-                  + "Code,FirstName,LastName,Role,Department,DaysWorked,TotalWorkingDays,Salary,Currency\n"
-                  + displayEmployees.map(e => `${e.employee_code},"${e.first_name}","${e.last_name}","${e.role_title}","${e.department_name}",30,30,${e.current_salary},${e.currency_code}`).join("\n");
+                const csvContent = "data:text/csv;charset=utf-8,"
+                  + "Code,FirstName,LastName,Role,Department,Salary,Currency\n"
+                  + displayEmployees.map(e => `${e.employee_code},"${e.first_name}","${e.last_name}","${e.role_title}","${e.department_name}",${e.current_salary},${e.currency_code}`).join("\n");
                 const encodedUri = encodeURI(csvContent);
                 const link = document.createElement("a");
                 link.setAttribute("href", encodedUri);
-                link.setAttribute("download", `payroll_export_${tableShortMonth}_${tableYear}.csv`);
+                link.setAttribute("download", `salary_register_${tableShortMonth}_${tableYear}.csv`);
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -986,11 +979,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <button
               type="button"
-              onClick={onRunPayroll}
+              onClick={onViewEmployees || onRunPayroll}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition min-h-[38px]"
             >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span>Run Payroll</span>
+              <Users className="w-3.5 h-3.5" />
+              <span>Manage Salaries</span>
             </button>
           </div>
         </div>

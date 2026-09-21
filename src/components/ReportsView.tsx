@@ -29,15 +29,15 @@ interface ReportsViewProps {
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({ stats }) => {
-  // Headcount distribution matching 31% US and 69% India
+  // Headcount distribution matching 69% US and 31% India
   const totalEmployees = stats?.total_active_employees || 10000;
-  const usEmployees = Math.round(totalEmployees * 0.31);
+  const usEmployees = Math.round(totalEmployees * 0.69);
   const inEmployees = totalEmployees - usEmployees;
 
   // Monthly totals in USD
   const totalPayrollUsd = stats?.total_payroll_month || 16250000;
-  // India tech salaries in USD + US salaries
-  const usTotalUsd = Math.round(totalPayrollUsd * 0.58);
+  // US salaries (69% headcount) + India salaries (31% headcount)
+  const usTotalUsd = Math.round(totalPayrollUsd * 0.82);
   const inTotalUsd = totalPayrollUsd - usTotalUsd;
 
   // 1. Bar Chart Data: Payroll Cost by Country (Current Month in USD)
@@ -46,7 +46,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ stats }) => {
       country: 'United States (US)',
       currency: 'USD ($)',
       headcount: usEmployees,
-      share: '31%',
+      share: '69%',
       totalPayrollUsd: usTotalUsd,
       avgSalaryUsd: Math.round(usTotalUsd / usEmployees)
     },
@@ -54,7 +54,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ stats }) => {
       country: 'India (IN)',
       currency: 'INR (₹)',
       headcount: inEmployees,
-      share: '69%',
+      share: '31%',
       totalPayrollUsd: inTotalUsd,
       avgSalaryUsd: Math.round(inTotalUsd / inEmployees)
     }

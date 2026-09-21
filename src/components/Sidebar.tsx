@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export type TabType = 'dashboard' | 'employees' | 'payroll' | 'reports' | 'settings' | 'about';
+export type TabType = 'dashboard' | 'employees' | 'reports';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -48,9 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'employees', label: 'Employees', icon: Users, badge: employeeCount > 0 ? employeeCount.toLocaleString() : undefined },
-    { id: 'payroll', label: 'Run Payroll', icon: CreditCard, highlight: true },
     { id: 'reports', label: 'Reports & Trends', icon: BarChart3 },
-    { id: 'settings', label: 'Settings & Rules', icon: Settings },
   ];
 
   const handleNavClick = (id: TabType) => {
@@ -130,39 +128,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bottom Section */}
       <div className="p-4 space-y-3">
-        {/* About Tab Item pinned to Left Bottom */}
-        <button
-          onClick={() => handleNavClick('about')}
-          className={cn(
-            "w-full flex items-center justify-between p-3 rounded-2xl text-left transition-all duration-150 min-h-[50px]",
-            activeTab === 'about'
-              ? "bg-blue-50 text-blue-700 border border-blue-200/80 shadow-xs"
-              : "bg-slate-50/90 hover:bg-slate-100/90 text-slate-700 border border-slate-200/70"
-          )}
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            <div className={cn(
-              "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition",
-              activeTab === 'about'
-                ? "bg-blue-600 text-white shadow-xs"
-                : "bg-white text-slate-600 border border-slate-200 shadow-2xs"
-            )}>
-              <Info className="w-4 h-4" />
-            </div>
-            <div className="truncate">
-              <span className={cn("block text-xs font-bold truncate", activeTab === 'about' ? "text-blue-900" : "text-slate-800")}>
-                About & Specs
-              </span>
-              <span className="block text-[10px] text-slate-400 truncate">
-                Cards Guide & Docs
-              </span>
-            </div>
-          </div>
-          <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0 ml-1">
-            PDF
-          </span>
-        </button>
-
         {/* Company & Entity Scope Display */}
         <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 hover:border-slate-200 bg-slate-50/50 transition">
           <div className="flex items-center gap-2.5 overflow-hidden">

@@ -94,6 +94,29 @@ apiRouter.put('/employees/:id', async (req: Request, res: Response) => {
   }
 });
 
+// PUT /api/employees/:id/salary - update current salary directly in SQLite
+apiRouter.put('/employees/:id/salary', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid employee ID' });
+    }
+
+    const currentSalary = req.body.current_salary !== undefined 
+      ? Number(req.body.current_salary) 
+      : (req.body.base_salary !== undefined ? Number(req.body.base_salary) : NaN);
+
+    if (isNaN(currentSalary) || currentSalary <= 0) {
+      return res.status(400).json({ error: 'Valid positive current_salary is required' });
+    }
+
+    const employee = await EmployeeRepository.updateEmployeeSalary(id, currentSalary, req.body.currency_code);
+    res.json(employee);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // PATCH /api/employees/:id/salary - record a salary change
 apiRouter.patch('/employees/:id/salary', async (req: Request, res: Response) => {
   try {
@@ -102,7 +125,14 @@ apiRouter.patch('/employees/:id/salary', async (req: Request, res: Response) => 
       return res.status(400).json({ error: 'Invalid employee ID' });
     }
 
-    const employee = await EmployeeRepository.recordSalaryChange(id, req.body);
+    const salary = req.body.current_salary !== undefined 
+      ? Number(req.body.current_salary) 
+      : Number(req.body.base_salary);
+
+    const employee = await EmployeeRepository.recordSalaryChange(id, {
+      ...req.body,
+      base_salary: salary
+    });
     res.json(employee);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -186,20 +216,6 @@ apiRouter.get('/activities', async (req: Request, res: Response) => {
   try {
     const activities = await EmployeeRepository.getActivityLogs();
     res.json(activities);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/payroll/run
-apiRouter.post('/payroll/run', async (req: Request, res: Response) => {
-  try {
-    const stats = await EmployeeRepository.getDashboardStats();
-    res.json({
-      success: true,
-      message: `Payroll run completed for ${stats.employees_paid_count} employees. Total: $${stats.total_payroll_month.toLocaleString()}`,
-      timestamp: new Date().toISOString()
-    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

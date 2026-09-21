@@ -109,7 +109,7 @@ export class EmployeeRepository {
           orderBy = `e.employee_code ${dir}`;
           break;
         case 'salary':
-          orderBy = `sr.base_salary ${dir}`;
+          orderBy = `COALESCE(e.current_salary, sr.base_salary, 0) ${dir}`;
           break;
         case 'hire_date':
           orderBy = `e.hire_date ${dir}`;
@@ -131,8 +131,8 @@ export class EmployeeRepository {
         e.role_title, e.country_code, e.currency_code,
         e.pay_band_id, pb.name as pay_band_name,
         e.employment_status, e.hire_date, e.created_at, e.updated_at,
-        sr.base_salary as current_salary,
-        (sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as current_salary_usd
+        COALESCE(e.current_salary, sr.base_salary, 0) as current_salary,
+        (COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as current_salary_usd
       FROM employees e
       LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN pay_bands pb ON e.pay_band_id = pb.id
@@ -198,8 +198,8 @@ export class EmployeeRepository {
         e.role_title, e.country_code, e.currency_code,
         e.pay_band_id, pb.name as pay_band_name,
         e.employment_status, e.hire_date, e.created_at, e.updated_at,
-        sr.base_salary as current_salary,
-        (sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as current_salary_usd
+        COALESCE(e.current_salary, sr.base_salary, 0) as current_salary,
+        (COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as current_salary_usd
       FROM employees e
       LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN pay_bands pb ON e.pay_band_id = pb.id
@@ -306,8 +306,8 @@ export class EmployeeRepository {
         INSERT INTO employees (
           employee_code, first_name, last_name, email, department_id,
           role_title, country_code, currency_code, pay_band_id,
-          employment_status, hire_date, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          current_salary, employment_status, hire_date, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         employeeCode,
         data.first_name.trim(),
@@ -318,6 +318,7 @@ export class EmployeeRepository {
         data.country_code.toUpperCase(),
         data.currency_code.toUpperCase(),
         Number(data.pay_band_id),
+        Number(data.base_salary),
         data.employment_status || 'active',
         hireDate,
         now,
@@ -372,6 +373,7 @@ export class EmployeeRepository {
     country_code?: string;
     currency_code?: string;
     pay_band_id?: number;
+    current_salary?: number;
     employment_status?: 'active' | 'inactive';
   }): Promise<Employee> {
     const db = await getDb();
@@ -386,6 +388,7 @@ export class EmployeeRepository {
     }
 
     const now = new Date().toISOString();
+    const today = now.split('T')[0];
     const firstName = data.first_name?.trim() || existing.first_name;
     const lastName = data.last_name?.trim() || existing.last_name;
     const email = data.email?.trim() || existing.email;
@@ -395,21 +398,96 @@ export class EmployeeRepository {
     const currencyCode = data.currency_code?.toUpperCase() || existing.currency_code;
     const payBandId = data.pay_band_id ? Number(data.pay_band_id) : existing.pay_band_id;
     const status = data.employment_status || existing.employment_status;
+    const hasSalaryUpdate = data.current_salary !== undefined && !isNaN(Number(data.current_salary)) && Number(data.current_salary) > 0;
+    const currentSalary: number = hasSalaryUpdate ? Number(data.current_salary) : (existing.current_salary ?? 0);
 
-    db.run(`
-      UPDATE employees SET
-        first_name = ?, last_name = ?, email = ?, department_id = ?,
-        role_title = ?, country_code = ?, currency_code = ?, pay_band_id = ?,
-        employment_status = ?, updated_at = ?
-      WHERE id = ?
-    `, [
-      firstName, lastName, email, departmentId,
-      roleTitle, countryCode, currencyCode, payBandId,
-      status, now, id
-    ]);
+    db.run("BEGIN TRANSACTION;");
+    try {
+      db.run(`
+        UPDATE employees SET
+          first_name = ?, last_name = ?, email = ?, department_id = ?,
+          role_title = ?, country_code = ?, currency_code = ?, pay_band_id = ?,
+          current_salary = ?, employment_status = ?, updated_at = ?
+        WHERE id = ?
+      `, [
+        firstName, lastName, email, departmentId,
+        roleTitle, countryCode, currencyCode, payBandId,
+        currentSalary, status, now, id
+      ]);
 
-    saveDatabase(db);
-    return (await this.getEmployeeById(id))!;
+      if (hasSalaryUpdate) {
+        db.run("UPDATE salary_records SET is_current = 0 WHERE employee_id = ?", [id]);
+        db.run(`
+          INSERT INTO salary_records (
+            employee_id, base_salary, currency_code, effective_date, is_current
+          ) VALUES (?, ?, ?, ?, 1)
+        `, [id, currentSalary, currencyCode, today]);
+      }
+
+      db.run("COMMIT;");
+      saveDatabase(db);
+      return (await this.getEmployeeById(id))!;
+    } catch (err) {
+      db.run("ROLLBACK;");
+      throw err;
+    }
+  }
+
+  // Update employee salary directly (PUT /api/employees/:id/salary)
+  static async updateEmployeeSalary(id: number, currentSalary: number, currencyCode?: string): Promise<Employee> {
+    const db = await getDb();
+    const existing = await this.getEmployeeById(id);
+    if (!existing) throw new Error(`Employee with ID ${id} not found`);
+
+    if (currentSalary === undefined || currentSalary === null || isNaN(Number(currentSalary)) || Number(currentSalary) <= 0) {
+      throw new Error("Current salary must be greater than zero");
+    }
+
+    const newSalary = Number(currentSalary);
+    const curr = currencyCode?.toUpperCase() || existing.currency_code;
+    const now = new Date().toISOString();
+    const today = now.split('T')[0];
+
+    db.run("BEGIN TRANSACTION;");
+    try {
+      // Directly update employees.current_salary and currency_code
+      db.run(
+        "UPDATE employees SET current_salary = ?, currency_code = ?, updated_at = ? WHERE id = ?",
+        [newSalary, curr, now, id]
+      );
+
+      // Mark previous salary records as not current
+      db.run("UPDATE salary_records SET is_current = 0 WHERE employee_id = ?", [id]);
+
+      // Insert new current salary record
+      db.run(`
+        INSERT INTO salary_records (
+          employee_id, base_salary, currency_code, effective_date, is_current
+        ) VALUES (?, ?, ?, ?, 1)
+      `, [id, newSalary, curr, today]);
+
+      // Activity log
+      db.run(`
+        INSERT INTO activity_logs (id, title, subtitle, status, type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [
+        `act-${Date.now()}`,
+        'Salary updated',
+        `${existing.first_name} ${existing.last_name}: ${curr} ${newSalary.toLocaleString()}`,
+        'Approved',
+        'salary',
+        now
+      ]);
+
+      db.run("COMMIT;");
+      saveDatabase(db);
+
+      const updated = await this.getEmployeeById(id);
+      return updated!;
+    } catch (err) {
+      db.run("ROLLBACK;");
+      throw err;
+    }
   }
 
   // Record a salary change (PATCH /api/employees/:id/salary)
@@ -443,12 +521,11 @@ export class EmployeeRepository {
         ) VALUES (?, ?, ?, ?, 1)
       `, [id, Number(data.base_salary), currencyCode, effectiveDate]);
 
-      // If currency changed, update on employee record
-      if (currencyCode !== existing.currency_code) {
-        db.run("UPDATE employees SET currency_code = ?, updated_at = ? WHERE id = ?", [currencyCode, now, id]);
-      } else {
-        db.run("UPDATE employees SET updated_at = ? WHERE id = ?", [now, id]);
-      }
+      // Update employee record
+      db.run(
+        "UPDATE employees SET current_salary = ?, currency_code = ?, updated_at = ? WHERE id = ?",
+        [Number(data.base_salary), currencyCode, now, id]
+      );
 
       // Add activity log
       db.run(`
@@ -459,7 +536,7 @@ export class EmployeeRepository {
         'Salary revision approved',
         `${existing.first_name} ${existing.last_name}: ${currencyCode} ${Number(data.base_salary).toLocaleString()}`,
         'Approved',
-        'payroll',
+        'salary',
         now
       ]);
 
@@ -503,8 +580,8 @@ export class EmployeeRepository {
         SELECT 
           e.country_code as group_name,
           COUNT(e.id) as employee_count,
-          SUM(sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as total_usd,
-          AVG(sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd
+          SUM(COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as total_usd,
+          AVG(COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd
         FROM employees e
         JOIN salary_records sr ON e.id = sr.employee_id AND sr.is_current = 1
         LEFT JOIN fx_rates fx ON e.currency_code = fx.currency_code
@@ -518,8 +595,8 @@ export class EmployeeRepository {
         SELECT 
           COALESCE(d.name, 'Unassigned') as group_name,
           COUNT(e.id) as employee_count,
-          SUM(sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as total_usd,
-          AVG(sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd
+          SUM(COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as total_usd,
+          AVG(COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd
         FROM employees e
         LEFT JOIN departments d ON e.department_id = d.id
         JOIN salary_records sr ON e.id = sr.employee_id AND sr.is_current = 1
@@ -561,7 +638,7 @@ export class EmployeeRepository {
     const sql = `
       SELECT 
         e.pay_band_id,
-        (sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as salary_usd
+        (COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as salary_usd
       FROM employees e
       JOIN salary_records sr ON e.id = sr.employee_id AND sr.is_current = 1
       LEFT JOIN fx_rates fx ON e.currency_code = fx.currency_code
@@ -646,7 +723,7 @@ export class EmployeeRepository {
           e.role_title,
           COALESCE(d.name, 'General') as department_name,
           e.country_code,
-          AVG(sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd,
+          AVG(COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd,
           COUNT(e.id) as headcount
         FROM employees e
         LEFT JOIN departments d ON e.department_id = d.id
@@ -664,7 +741,7 @@ export class EmployeeRepository {
           e.role_title,
           COALESCE(d.name, 'General') as department_name,
           e.country_code,
-          AVG(sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd,
+          AVG(COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) as avg_usd,
           COUNT(e.id) as headcount
         FROM employees e
         LEFT JOIN departments d ON e.department_id = d.id
@@ -704,7 +781,7 @@ export class EmployeeRepository {
 
     // Monthly payroll calculation (annual / 12)
     let payrollSql = `
-      SELECT SUM((sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) / 12.0)
+      SELECT SUM((COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) / 12.0)
       FROM employees e
       JOIN salary_records sr ON e.id = sr.employee_id AND sr.is_current = 1
       LEFT JOIN fx_rates fx ON e.currency_code = fx.currency_code
@@ -772,8 +849,8 @@ export class EmployeeRepository {
 
     let sql = `
       SELECT 
-        SUM((sr.base_salary * COALESCE(fx.rate_to_usd, 1.0)) / 12.0) as usd_monthly,
-        SUM(sr.base_salary / 12.0) as local_monthly,
+        SUM((COALESCE(e.current_salary, sr.base_salary, 0) * COALESCE(fx.rate_to_usd, 1.0)) / 12.0) as usd_monthly,
+        SUM(COALESCE(e.current_salary, sr.base_salary, 0) / 12.0) as local_monthly,
         e.currency_code
       FROM employees e
       JOIN salary_records sr ON e.id = sr.employee_id AND sr.is_current = 1

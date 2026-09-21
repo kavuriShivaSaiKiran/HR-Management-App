@@ -5,12 +5,14 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   UserCheck,
   UserX,
   History,
   Trash2,
   Plus,
   DollarSign,
+  Pencil,
   LayoutGrid,
   List,
   SlidersHorizontal,
@@ -81,7 +83,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   isLoading
 }) => {
   const [showFiltersMobile, setShowFiltersMobile] = useState(false);
-  const [viewMode, setViewMode] = useState<'auto' | 'cards' | 'table'>('auto');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
 
   const employees = data?.data || [];
   const total = data?.pagination?.total || 0;
@@ -97,8 +99,8 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   };
 
   const countries = [
-    { code: 'US', name: '🇺🇸 United States (31% • USD)' },
-    { code: 'IN', name: '🇮🇳 India (69% • INR)' }
+    { code: 'US', name: '🇺🇸 United States (69% • USD)' },
+    { code: 'IN', name: '🇮🇳 India (31% • INR)' }
   ];
 
   const activeFilterCount = [
@@ -135,29 +137,35 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 self-stretch sm:self-auto">
-          {/* View mode toggle button */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl gap-1 shrink-0">
+          {/* View mode toggle button: List on left, Grid on right */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl gap-1 shrink-0 border border-slate-200/80">
             <button
-              onClick={() => setViewMode('cards')}
-              className={cn(
-                "p-2 rounded-lg text-xs font-semibold transition min-h-[38px] min-w-[38px] flex items-center justify-center",
-                viewMode === 'cards' || (viewMode === 'auto') ? "bg-white text-blue-600 shadow-xs md:bg-transparent md:text-slate-600 md:shadow-none" : "text-slate-600 hover:text-slate-900"
-              )}
-              title="Cards view"
-              aria-label="Cards view"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
+              type="button"
               onClick={() => setViewMode('table')}
               className={cn(
-                "p-2 rounded-lg text-xs font-semibold transition min-h-[38px] min-w-[38px] flex items-center justify-center",
-                viewMode === 'table' ? "bg-white text-blue-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                "p-2 rounded-lg text-xs font-semibold transition min-h-[38px] min-w-[38px] flex items-center justify-center cursor-pointer",
+                viewMode === 'table'
+                  ? "bg-white text-blue-600 shadow-sm border border-slate-200/70 font-bold"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
               )}
-              title="Table view"
-              aria-label="Table view"
+              title="List view"
+              aria-label="List view"
             >
               <List className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              className={cn(
+                "p-2 rounded-lg text-xs font-semibold transition min-h-[38px] min-w-[38px] flex items-center justify-center cursor-pointer",
+                viewMode === 'cards'
+                  ? "bg-white text-blue-600 shadow-sm border border-slate-200/70 font-bold"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
+              )}
+              title="Grid view"
+              aria-label="Grid view"
+            >
+              <LayoutGrid className="w-4 h-4" />
             </button>
           </div>
 
@@ -176,7 +184,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         {/* Mobile Filter Toggle Header */}
         <div className="flex items-center justify-between gap-2 sm:hidden">
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               placeholder="Search employee..."
@@ -185,14 +193,14 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[40px]"
+              className="w-full h-11 pl-10 pr-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
             />
           </div>
 
           <button
             onClick={() => setShowFiltersMobile(!showFiltersMobile)}
             className={cn(
-              "px-3 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition min-h-[40px] shrink-0",
+              "px-3.5 h-11 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition shrink-0",
               showFiltersMobile || activeFilterCount > 0
                 ? "bg-blue-50 border-blue-300 text-blue-700"
                 : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
@@ -215,8 +223,8 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         )}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
             {/* Search by Name or Code (Hidden on mobile inside dropdown since it's above) */}
-            <div className="relative hidden sm:block">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <div className="relative hidden sm:block w-full">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search name, code, role..."
@@ -225,75 +233,79 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   setSearch(e.target.value);
                   setPage(1);
                 }}
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition min-h-[40px]"
+                className="w-full h-11 pl-10 pr-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
               />
             </div>
 
             {/* Department Filter */}
-            <div className="relative">
+            <div className="relative w-full">
               <select
                 value={selectedDept}
                 onChange={(e) => {
                   setSelectedDept(e.target.value);
                   setPage(1);
                 }}
-                className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[40px]"
+                className="w-full h-11 pl-3.5 pr-9 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer transition truncate"
               >
                 <option value="">All Departments</option>
                 {departments.map((d) => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
 
             {/* Country Filter */}
-            <div className="relative">
+            <div className="relative w-full">
               <select
                 value={selectedCountry}
                 onChange={(e) => {
                   setSelectedCountry(e.target.value);
                   setPage(1);
                 }}
-                className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[40px]"
+                className="w-full h-11 pl-3.5 pr-9 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer transition truncate"
               >
                 <option value="">All Countries</option>
                 {countries.map((c) => (
                   <option key={c.code} value={c.code}>{c.name}</option>
                 ))}
               </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
 
             {/* Pay Band Filter */}
-            <div className="relative">
+            <div className="relative w-full">
               <select
                 value={selectedBand}
                 onChange={(e) => {
                   setSelectedBand(e.target.value);
                   setPage(1);
                 }}
-                className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[40px]"
+                className="w-full h-11 pl-3.5 pr-9 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer transition truncate"
               >
                 <option value="">All Pay Bands</option>
                 {payBands.map((b) => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
 
             {/* Status Filter */}
-            <div className="relative">
+            <div className="relative w-full">
               <select
                 value={selectedStatus}
                 onChange={(e) => {
                   setSelectedStatus(e.target.value);
                   setPage(1);
                 }}
-                className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[40px]"
+                className="w-full h-11 pl-3.5 pr-9 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer transition truncate"
               >
                 <option value="all">All Statuses</option>
                 <option value="active">Active Only</option>
                 <option value="inactive">Inactive (Soft-Deleted)</option>
               </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
         </div>
@@ -332,10 +344,9 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         </div>
       </div>
 
-      {/* 1. MOBILE CARD VIEW (Active on mobile screens < md, or when forced 'cards') */}
+      {/* 1. GRID / CARDS VIEW */}
       <div className={cn(
-        "space-y-3",
-        viewMode === 'table' ? "hidden" : viewMode === 'cards' ? "block" : "block md:hidden"
+        viewMode === 'cards' ? "block" : "hidden"
       )}>
         {isLoading ? (
           <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-400">
@@ -356,114 +367,116 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             )}
           </div>
         ) : (
-          employees.map((emp) => (
-            <div
-              key={emp.id}
-              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3.5 hover:border-blue-200 transition"
-            >
-              {/* Card Top: Avatar, Name, Code, Status */}
-              <div className="flex items-start justify-between gap-3">
-                <div
-                  onClick={() => onSelectEmployee(emp)}
-                  className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
-                >
-                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs">
-                    {getInitials(emp.first_name, emp.last_name)}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-900 text-sm truncate leading-tight">
-                      {emp.first_name} {emp.last_name}
-                    </p>
-                    <p className="text-xs text-slate-400 truncate mt-0.5">{emp.email}</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                    {emp.employee_code}
-                  </span>
-                  {emp.employment_status === 'active' ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      <UserCheck className="w-3 h-3 text-emerald-600" />
-                      Active
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                      <UserX className="w-3 h-3 text-slate-400" />
-                      Inactive
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Card Mid: Role, Dept, Band, Country */}
-              <div className="grid grid-cols-2 gap-2 p-3 bg-slate-50/80 rounded-xl text-xs border border-slate-100">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Department & Role</span>
-                  <p className="font-bold text-slate-800 truncate mt-0.5">{emp.role_title}</p>
-                  <p className="text-[11px] text-slate-500 truncate">{emp.department_name}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Location & Band</span>
-                  <p className="font-bold text-slate-800 mt-0.5">{emp.country_code} ({emp.currency_code})</p>
-                  <p className="text-[11px] text-slate-500 truncate">{emp.pay_band_name || 'L3 - Mid'}</p>
-                </div>
-              </div>
-
-              {/* Card Bottom: Salary highlight & Quick action buttons */}
-              <div className="flex items-end justify-between pt-1 border-t border-slate-100">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Current Salary</span>
-                  <p className="text-base font-extrabold text-slate-900 leading-tight mt-0.5">
-                    {emp.current_salary ? formatCurrency(emp.current_salary, emp.currency_code) : '—'}
-                  </p>
-                  {emp.currency_code !== 'USD' && emp.current_salary_usd && (
-                    <p className="text-[11px] font-medium text-slate-400">
-                      ≈ ${emp.current_salary_usd.toLocaleString()} USD
-                    </p>
-                  )}
-                </div>
-
-                {/* 3 Large Touch Buttons (min 44px touch area) */}
-                <div className="flex items-center gap-2">
-                  <button
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4">
+            {employees.map((emp) => (
+              <div
+                key={emp.id}
+                className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3.5 hover:border-blue-200 hover:shadow-xs transition flex flex-col justify-between"
+              >
+                {/* Card Top: Avatar, Name, Code, Status */}
+                <div className="flex items-start justify-between gap-3">
+                  <div
                     onClick={() => onSelectEmployee(emp)}
-                    title="View Profile"
-                    className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center min-h-[44px] min-w-[44px] shadow-2xs"
-                    aria-label="View employee profile"
+                    className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
                   >
-                    <History className="w-4 h-4 text-blue-600" />
-                  </button>
+                    <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs">
+                      {getInitials(emp.first_name, emp.last_name)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 text-sm truncate leading-tight">
+                        {emp.first_name} {emp.last_name}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate mt-0.5">{emp.email}</p>
+                    </div>
+                  </div>
 
-                  <button
-                    onClick={() => onOpenSalaryChange(emp)}
-                    title="Record Salary Revision"
-                    className="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center min-h-[44px] min-w-[44px] shadow-2xs font-bold text-xs"
-                    aria-label="Record salary change"
-                  >
-                    <DollarSign className="w-4 h-4" />
-                  </button>
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                      {emp.employee_code}
+                    </span>
+                    {emp.employment_status === 'active' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <UserCheck className="w-3 h-3 text-emerald-600" />
+                        Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                        <UserX className="w-3 h-3 text-slate-400" />
+                        Inactive
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-                  <button
-                    onClick={() => onSoftDelete(emp)}
-                    disabled={emp.employment_status !== 'active'}
-                    title="Soft Delete"
-                    className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center min-h-[44px] min-w-[44px] shadow-2xs disabled:opacity-30"
-                    aria-label="Soft delete employee"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                {/* Card Mid: Role, Dept, Band, Country */}
+                <div className="grid grid-cols-2 gap-2 p-3 bg-slate-50/80 rounded-xl text-xs border border-slate-100">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Department & Role</span>
+                    <p className="font-bold text-slate-800 truncate mt-0.5">{emp.role_title}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{emp.department_name}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Location & Band</span>
+                    <p className="font-bold text-slate-800 mt-0.5">{emp.country_code} ({emp.currency_code})</p>
+                    <p className="text-[11px] text-slate-500 truncate">{emp.pay_band_name || 'L3 - Mid'}</p>
+                  </div>
+                </div>
+
+                {/* Card Bottom: Salary highlight & Quick action buttons */}
+                <div className="flex items-end justify-between pt-2 border-t border-slate-100 gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Current Salary</span>
+                    <p className="text-base font-extrabold text-slate-900 leading-tight mt-0.5 truncate">
+                      {emp.current_salary ? formatCurrency(emp.current_salary, emp.currency_code) : '—'}
+                    </p>
+                    {emp.currency_code !== 'USD' && emp.current_salary_usd && (
+                      <p className="text-[11px] font-medium text-slate-400 truncate">
+                        ≈ ${emp.current_salary_usd.toLocaleString()} USD
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 3 Touch Buttons */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => onSelectEmployee(emp)}
+                      title="View Profile"
+                      className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center h-9 w-9 shadow-2xs"
+                      aria-label="View employee profile"
+                    >
+                      <History className="w-4 h-4 text-blue-600" />
+                    </button>
+
+                    <button
+                      onClick={() => onOpenSalaryChange(emp)}
+                      title="Edit Salary"
+                      className="p-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 flex items-center justify-center h-9 w-9 shadow-2xs font-bold transition-colors"
+                      aria-label="Edit employee salary"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => onSoftDelete(emp)}
+                      disabled={emp.employment_status !== 'active'}
+                      title="Soft Delete"
+                      className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center h-9 w-9 shadow-2xs disabled:opacity-30"
+                      aria-label="Soft delete employee"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
       </div>
 
-      {/* 2. DESKTOP / TABLET DATA TABLE (Active on md+, or when forced 'table') */}
+      {/* 2. TABLE / LIST VIEW */}
       <div className={cn(
         "bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden",
-        viewMode === 'cards' ? "hidden" : viewMode === 'table' ? "block" : "hidden md:block"
+        viewMode === 'table' ? "block" : "hidden"
       )}>
         <div className="overflow-x-auto min-h-[380px]">
           <table className="w-full text-left text-xs">
@@ -618,11 +631,12 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                           <History className="w-4 h-4" />
                         </button>
                         <button
-                          title="Record Salary Revision"
+                          title="Edit Salary"
                           onClick={() => onOpenSalaryChange(emp)}
-                          className="p-2 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition min-h-[36px] min-w-[36px] flex items-center justify-center"
+                          className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition min-h-[36px] min-w-[36px] flex items-center justify-center"
+                          aria-label="Edit employee salary"
                         >
-                          <DollarSign className="w-4 h-4" />
+                          <Pencil className="w-4 h-4" />
                         </button>
                         <button
                           title={emp.employment_status === 'active' ? "Soft Delete" : "Already Inactive"}

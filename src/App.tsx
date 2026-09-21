@@ -3,14 +3,13 @@ import { Sidebar, TabType } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { DashboardView } from './components/DashboardView';
 import { EmployeesView } from './components/EmployeesView';
-import { PayrollRunView } from './components/PayrollRunView';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { EmployeePortalView } from './components/EmployeePortalView';
 import { LoginModal } from './components/LoginModal';
 import { EmployeeDetailModal } from './components/EmployeeDetailModal';
 import { AddEmployeeModal } from './components/AddEmployeeModal';
-import { RecordSalaryModal } from './components/RecordSalaryModal';
+import { EditSalaryModal } from './components/EditSalaryModal';
 import { DocsModal } from './components/DocsModal';
 import { AboutView } from './components/AboutView';
 import { NotificationDrawer } from './components/NotificationDrawer';
@@ -307,22 +306,28 @@ export default function App() {
     fetchDashboardData();
   };
 
-  // Record Salary Revision
-  const handleRecordSalaryChange = async (id: number, data: any) => {
+  // Edit Employee Salary (PUT /api/employees/:id/salary) with instant cache invalidation
+  const handleSaveSalary = async (id: number, newSalary: number) => {
     const res = await fetch(`/api/employees/${id}/salary`, {
-      method: 'PATCH',
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      body: JSON.stringify({ current_salary: newSalary })
     });
     if (!res.ok) {
       const errJson = await res.json();
-      throw new Error(errJson.error || 'Failed to record salary revision');
+      throw new Error(errJson.error || 'Failed to update salary');
     }
     const updated = await res.json();
-    setSelectedEmployee(updated);
-    showToast(`Recorded new compensation for ${updated.first_name} ${updated.last_name}`);
-    fetchEmployees();
-    fetchDashboardData();
+    if (selectedEmployee && selectedEmployee.id === id) {
+      setSelectedEmployee(updated);
+    }
+    showToast(`Updated salary for ${updated.first_name} ${updated.last_name} to ${updated.currency_code} ${Number(newSalary).toLocaleString()}`);
+    // Cache invalidation: immediately refresh both directory and dashboard metrics
+    await Promise.all([fetchEmployees(), fetchDashboardData()]);
+  };
+
+  const handleRecordSalaryChange = async (id: number, data: any) => {
+    await handleSaveSalary(id, Number(data.base_salary || data.current_salary));
   };
 
   // Soft Delete Employee
@@ -343,18 +348,6 @@ export default function App() {
       fetchDashboardData();
     } catch (err: any) {
       showToast(err.message || 'Failed to soft delete employee', 'error');
-    }
-  };
-
-  // Run Monthly Payroll Simulation
-  const handleRunPayroll = async () => {
-    try {
-      const res = await fetch('/api/payroll/run', { method: 'POST' });
-      const data = await res.json();
-      showToast(data.message || 'Payroll processed successfully');
-      fetchDashboardData();
-    } catch (err: any) {
-      showToast('Failed to run payroll', 'error');
     }
   };
 
@@ -453,7 +446,7 @@ export default function App() {
             />
           ) : (
             <>
-              {/* TAB 1: DASHBOARD (Multi-Country US & India Hubs) */}
+              {/* TAB 1: DASHBOARD */}
               {activeTab === 'dashboard' && (
                 <DashboardView
                   stats={stats}
@@ -461,11 +454,8 @@ export default function App() {
                   activities={activities}
                   onSelectEmployee={handleOpenEmployeeDetail}
                   onPageChange={(p) => setPage(p)}
-                  onRunPayroll={handleRunPayroll}
-                  onStartCountryPayroll={(country) => {
-                    setSelectedPayrollCountry(country);
-                    setActiveTab('payroll');
-                  }}
+                  onRunPayroll={() => setActiveTab('employees')}
+                  onViewEmployees={() => setActiveTab('employees')}
                   onViewReports={() => setActiveTab('reports')}
                   currentPage={page}
                   selectedDateRange={selectedDateRange}
@@ -504,43 +494,9 @@ export default function App() {
                 />
               )}
 
-              {/* TAB 3: RUN PAYROLL WORKFLOW */}
-              {activeTab === 'payroll' && (
-                <PayrollRunView
-                  initialCountry={selectedPayrollCountry}
-                  departments={departments}
-                  payBands={payBands}
-                  onRunComplete={() => {
-                    fetchDashboardData();
-                    fetchEmployees();
-                    showToast('Payroll run successfully processed & disbursed!');
-                  }}
-                />
-              )}
-
-              {/* TAB 4: REPORTS & COST ANALYTICS */}
+              {/* TAB 3: REPORTS & TRENDS */}
               {activeTab === 'reports' && (
                 <ReportsView stats={stats} />
-              )}
-
-              {/* TAB 5: SETTINGS & STATUTORY RULES */}
-              {activeTab === 'settings' && (
-                <SettingsView
-                  onReseedComplete={() => {
-                    fetchMeta();
-                    fetchEmployees();
-                    fetchDashboardData();
-                    showToast('Database re-seeded with 10,000 employees (31% US, 69% India)!');
-                  }}
-                />
-              )}
-
-              {/* TAB 6: ABOUT & SPECS / CARDS FUNCTIONALITY GUIDE */}
-              {activeTab === 'about' && (
-                <AboutView
-                  onNavigateToTab={(tab) => handleTabChange(tab as TabType)}
-                  onReseed={handleReseed}
-                />
               )}
             </>
           )}
@@ -570,13 +526,13 @@ export default function App() {
         />
       )}
 
-      {/* Modal 3: Record Salary Revision */}
+      {/* Modal 3: Edit Employee Salary (Core Feature) */}
       {salaryChangeEmployee && (
-        <RecordSalaryModal
+        <EditSalaryModal
+          isOpen={Boolean(salaryChangeEmployee)}
           employee={salaryChangeEmployee}
-          payBands={payBands}
           onClose={() => setSalaryChangeEmployee(null)}
-          onRecordSalaryChange={handleRecordSalaryChange}
+          onSave={handleSaveSalary}
         />
       )}
 
@@ -627,33 +583,13 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => handleTabChange('payroll')}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[54px] ${
-            activeTab === 'payroll' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <CreditCard className={`w-5 h-5 mb-0.5 ${activeTab === 'payroll' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span>Payroll</span>
-        </button>
-
-        <button
           onClick={() => handleTabChange('reports')}
           className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[54px] ${
             activeTab === 'reports' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-800'
           }`}
         >
           <BarChart3 className={`w-5 h-5 mb-0.5 ${activeTab === 'reports' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span>Analytics</span>
-        </button>
-
-        <button
-          onClick={() => handleTabChange('about')}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[54px] ${
-            activeTab === 'about' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Info className={`w-5 h-5 mb-0.5 ${activeTab === 'about' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span>About</span>
+          <span>Reports</span>
         </button>
       </nav>
     </div>

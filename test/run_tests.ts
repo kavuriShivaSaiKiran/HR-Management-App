@@ -127,21 +127,21 @@ async function runTests() {
   db.run(`
     INSERT INTO employees (
       employee_code, first_name, last_name, email, department_id,
-      role_title, country_code, currency_code, pay_band_id, employment_status,
+      role_title, country_code, currency_code, pay_band_id, current_salary, employment_status,
       hire_date, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     'EMP-NOSAL', 'No', 'Salary', 'no.salary@acme.test', 2,
-    'Intern', 'US', 'USD', 1, 'active', '2024-01-01', now, now
+    'Intern', 'US', 'USD', 1, 0, 'active', '2024-01-01', now, now
   ]);
   const noSalId = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
   const noSalQuery = db.exec(`
-    SELECT e.id, sr.base_salary
+    SELECT e.id, sr.base_salary, e.current_salary
     FROM employees e
     LEFT JOIN salary_records sr ON e.id = sr.employee_id AND sr.is_current = 1
     WHERE e.id = ?
   `, [noSalId])[0].values[0];
-  assert(noSalQuery[1] === null, 'Employee with no salary history safely handled with null current salary');
+  assert(noSalQuery[1] === null, 'Employee with no salary history safely handled with null current salary in records');
 
   // 2. Empty filter results
   const emptyFilter = db.exec("SELECT COUNT(*) FROM employees WHERE department_id = 9999")[0].values[0][0];
@@ -150,6 +150,35 @@ async function runTests() {
   // 3. Pagination boundaries
   const pagedRes = db.exec("SELECT * FROM employees LIMIT 5 OFFSET 0")[0].values;
   assert(pagedRes.length <= 5, 'Pagination limit strictly respected');
+
+  console.log('\n[7] Testing Direct Current Salary Column & Database Pagination...');
+  // Verify current_salary column exists on employees table
+  const colInfo = db.exec("PRAGMA table_info(employees)")[0].values;
+  const hasCurrentSalaryCol = colInfo.some(col => col[1] === 'current_salary');
+  assert(hasCurrentSalaryCol, 'employees table has dedicated current_salary column');
+
+  // Test updating current_salary directly on employee row
+  db.run("UPDATE employees SET current_salary = 245000, updated_at = ? WHERE id = ?", [new Date().toISOString(), newEmpId]);
+  const updatedEmpSalary = db.exec("SELECT current_salary FROM employees WHERE id = ?", [newEmpId])[0].values[0][0];
+  assert(updatedEmpSalary === 245000, 'current_salary column updated to 245,000');
+
+  // Verify query with COALESCE returns the updated current_salary
+  const coalesceQuery = db.exec(`
+    SELECT COALESCE(e.current_salary, sr.base_salary, 0) as effective_salary
+    FROM employees e
+    LEFT JOIN salary_records sr ON e.id = sr.employee_id AND sr.is_current = 1
+    WHERE e.id = ?
+  `, [newEmpId])[0].values[0][0];
+  assert(coalesceQuery === 245000, 'COALESCE returns direct current_salary immediately');
+
+  // Test database-level LIMIT and OFFSET pagination
+  const page1 = db.exec("SELECT id FROM employees ORDER BY id ASC LIMIT 2 OFFSET 0")[0].values;
+  const page2 = db.exec("SELECT id FROM employees ORDER BY id ASC LIMIT 2 OFFSET 2")[0].values;
+  assert(page1.length <= 2, 'Page 1 correctly limits records to 2');
+  assert(page2.length <= 2, 'Page 2 correctly limits records to 2');
+  if (page1.length > 0 && page2.length > 0) {
+    assert(page1[0][0] !== page2[0][0], 'Page 1 and Page 2 records are distinct via OFFSET');
+  }
 
   console.log(`\n================================`);
   console.log(`Tests finished: ${passed} passed, ${failed} failed.`);

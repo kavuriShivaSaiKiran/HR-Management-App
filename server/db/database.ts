@@ -84,6 +84,7 @@ export function initializeSchema(db: Database): void {
       country_code TEXT NOT NULL,
       currency_code TEXT NOT NULL,
       pay_band_id INTEGER NOT NULL REFERENCES pay_bands(id),
+      current_salary REAL DEFAULT 0,
       employment_status TEXT NOT NULL DEFAULT 'active',
       hire_date TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -116,6 +117,12 @@ export function initializeSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_sal_emp ON salary_records(employee_id);
     CREATE INDEX IF NOT EXISTS idx_sal_curr ON salary_records(is_current);
   `);
+
+  try {
+    db.run("ALTER TABLE employees ADD COLUMN current_salary REAL DEFAULT 0;");
+  } catch {
+    // Column already exists
+  }
 
   // Seed reference tables if empty
   const deptCount = db.exec("SELECT COUNT(*) as c FROM departments")[0]?.values[0][0] as number;
@@ -174,11 +181,11 @@ export function initializeSchema(db: Database): void {
     );
   }
 
-  // Check if employees exist and conform to 2-country demo (US 31%, IN 69%). If not, reseed full dataset!
+  // Check if employees exist and conform to 2-country demo (US 69%, IN 31%). If not, reseed full dataset!
   const empCount = db.exec("SELECT COUNT(*) as c FROM employees")[0]?.values[0][0] as number;
   const nonUsInCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code NOT IN ('US', 'IN')")[0]?.values[0][0] as number;
   if (!empCount || empCount < 10000 || nonUsInCount > 0) {
-    console.log(`Reseeding database with 2-country demo specification: 31% US & 69% India...`);
+    console.log(`Reseeding database with 2-country demo specification: 69% US & 31% India...`);
     seedEmployees(db, 10000, true);
   }
 }
@@ -189,10 +196,10 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
     db.run("DELETE FROM employees;");
   }
 
-  // Multi-country angle: Exactly 2 countries (US ~31%, India ~69%)
+  // Multi-country angle: Exactly 2 countries (US ~69%, India ~31%)
   const countryConfigs = [
-    { country: 'US', currency: 'USD', rate: 1.0, weight: 0.31 },
-    { country: 'IN', currency: 'INR', rate: 0.012, weight: 0.69 }
+    { country: 'US', currency: 'USD', rate: 1.0, weight: 0.69 },
+    { country: 'IN', currency: 'INR', rate: 0.012, weight: 0.31 }
   ];
 
   const rolesByDept: Record<string, string[]> = {
@@ -225,9 +232,9 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
   const empStmt = db.prepare(`
     INSERT INTO employees (
       employee_code, first_name, last_name, email, department_id,
-      role_title, country_code, currency_code, pay_band_id, employment_status,
-      hire_date, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      role_title, country_code, currency_code, pay_band_id, current_salary,
+      employment_status, hire_date, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const salStmt = db.prepare(`
@@ -408,6 +415,7 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
         sc.country,
         sc.currency,
         band.id,
+        sc.salary,
         sc.status,
         sc.hireDate,
         now,
@@ -424,12 +432,12 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
     startId += showcaseEmployees.length;
   }
 
-  // Generate remaining employees up to count: exactly 31% US and 69% India
+  // Generate remaining employees up to count: exactly 31% India and 69% US
   for (let i = 0; i < countToGenerate; i++) {
     const currentId = startId + i;
     const empCode = `EMP-${currentId.toString().padStart(5, '0')}`;
 
-    // Select country based on strict requirement: 31% US, 69% India
+    // 31% India, 69% US
     const distRoll = Math.random();
     const cConf = distRoll < 0.31 ? countryConfigs[0] : countryConfigs[1];
 
@@ -453,14 +461,21 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
 
     const band = bandList[bandIdx] || bandList[1];
 
-    // Status: 95% active, 5% inactive (for soft delete demonstration)
-    const status = Math.random() > 0.05 ? 'active' : 'inactive';
+    // Status: active
+    const status = 'active';
     
     // Hire date between 2018 and 2024
     const hireYear = 2018 + Math.floor(Math.random() * 6);
     const hireMonth = (1 + Math.floor(Math.random() * 12)).toString().padStart(2, '0');
     const hireDay = (1 + Math.floor(Math.random() * 28)).toString().padStart(2, '0');
     const hireDate = `${hireYear}-${hireMonth}-${hireDay}`;
+
+    // Calculate base salary in local currency based on USD band range
+    const bandSpread = band.max - band.min;
+    const baseUsd = band.min + (Math.random() * 0.9 + 0.05) * bandSpread;
+    
+    // Convert to local currency deterministically
+    const localSalary = Math.round(baseUsd / cConf.rate);
 
     empStmt.run([
       empCode,
@@ -472,6 +487,7 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       cConf.country,
       cConf.currency,
       band.id,
+      localSalary,
       status,
       hireDate,
       now,
@@ -480,14 +496,7 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
 
     const empIdRes = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
 
-    // Calculate base salary in local currency based on USD band range
-    const bandSpread = band.max - band.min;
-    const baseUsd = band.min + (Math.random() * 0.9 + 0.05) * bandSpread;
-    
-    // Convert to local currency deterministically
-    const localSalary = Math.round(baseUsd / cConf.rate);
-
-    // 40% chance of employee having 1 past salary record (e.g. initial salary before merit increase)
+    // Past salary history
     const hasHistory = Math.random() < 0.4 && hireYear <= 2022;
     if (hasHistory) {
       const pastSalary = Math.round(localSalary * (0.85 + Math.random() * 0.08));
