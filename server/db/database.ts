@@ -97,7 +97,12 @@ export function initializeSchema(db: Database): void {
       base_salary REAL NOT NULL,
       currency_code TEXT NOT NULL,
       effective_date TEXT NOT NULL,
-      is_current INTEGER NOT NULL DEFAULT 1
+      is_current INTEGER NOT NULL DEFAULT 1,
+      previous_salary REAL DEFAULT 0,
+      reason TEXT DEFAULT 'Annual review',
+      comment TEXT DEFAULT '',
+      changed_by TEXT DEFAULT 'HR Manager',
+      created_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS activity_logs (
@@ -123,6 +128,22 @@ export function initializeSchema(db: Database): void {
   } catch {
     // Column already exists
   }
+
+  try {
+    db.run("ALTER TABLE salary_records ADD COLUMN previous_salary REAL DEFAULT 0;");
+  } catch {}
+  try {
+    db.run("ALTER TABLE salary_records ADD COLUMN reason TEXT DEFAULT 'Annual review';");
+  } catch {}
+  try {
+    db.run("ALTER TABLE salary_records ADD COLUMN comment TEXT DEFAULT '';");
+  } catch {}
+  try {
+    db.run("ALTER TABLE salary_records ADD COLUMN changed_by TEXT DEFAULT 'HR Manager';");
+  } catch {}
+  try {
+    db.run("ALTER TABLE salary_records ADD COLUMN created_at TEXT;");
+  } catch {}
 
   // Seed reference tables if empty
   const deptCount = db.exec("SELECT COUNT(*) as c FROM departments")[0]?.values[0][0] as number;
@@ -181,12 +202,86 @@ export function initializeSchema(db: Database): void {
     );
   }
 
-  // Check if employees exist and conform to 2-country demo (US 69%, IN 31%). If not, reseed full dataset!
-  const empCount = db.exec("SELECT COUNT(*) as c FROM employees")[0]?.values[0][0] as number;
-  const nonUsInCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code NOT IN ('US', 'IN')")[0]?.values[0][0] as number;
-  if (!empCount || empCount < 10000 || nonUsInCount > 0) {
-    console.log(`Reseeding database with 2-country demo specification: 69% US & 31% India...`);
+  // Check if employees exist and conform to 2-country demo (India 69%, US 31% with country-based wages)
+  const inCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code = 'IN'")[0]?.values[0][0] as number;
+  const usCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code = 'US'")[0]?.values[0][0] as number;
+  const total = (inCount || 0) + (usCount || 0);
+  const avgInSalary = inCount > 0 ? (db.exec("SELECT AVG(current_salary) FROM employees WHERE country_code = 'IN'")[0]?.values[0][0] as number) : 0;
+  
+  if (!total || total < 10000 || (inCount / total) < 0.65 || (inCount / total) > 0.73 || avgInSalary > 4000000) {
+    console.log(`Reseeding database with 2-country specification: 69% India & 31% US with country-based wages...`);
     seedEmployees(db, 10000, true);
+  }
+
+  // Ensure historical salary revision data exists for analysis periods
+  ensurePeriodSalaryData(db);
+}
+
+export function ensurePeriodSalaryData(db: Database): void {
+  try {
+    const countRes = db.exec("SELECT COUNT(*) FROM salary_records WHERE previous_salary > 0 AND effective_date >= '2025-10-01'")[0]?.values[0][0] as number || 0;
+    if (countRes >= 200) {
+      return;
+    }
+
+    const empRes = db.exec("SELECT id, current_salary, currency_code, hire_date, country_code FROM employees WHERE employment_status = 'active' ORDER BY id ASC");
+    if (!empRes.length || !empRes[0].values.length) return;
+
+    const employees = empRes[0].values;
+    const reasons = ['Annual review', 'Merit cycle adjustment', 'Promotion', 'Market adjustment', 'Performance revision'];
+    const approvers = ['HR Manager', 'VP People', 'Comp Committee', 'Executive Dir'];
+
+    // Review dates across Oct 2025 - Sep 2026
+    const reviewDates = [
+      '2025-10-15', '2025-11-01', '2025-11-20', '2025-12-10', // Q4 2025
+      '2026-01-15', '2026-01-28', '2026-02-14', '2026-03-01', '2026-03-15', // Q1 2026
+      '2026-04-01', '2026-04-15', '2026-05-10', '2026-06-01', '2026-06-15', // Q2 2026
+      '2026-07-01', '2026-07-15', '2026-08-01', '2026-08-15', '2026-09-01', '2026-09-15', '2026-09-21' // Q3 2026
+    ];
+
+    db.run("BEGIN TRANSACTION;");
+
+    const targetCount = Math.min(1400, Math.floor(employees.length * 0.20));
+    for (let i = 0; i < targetCount; i++) {
+      const emp = employees[i];
+      const empId = emp[0] as number;
+      const currentSalary = Number(emp[1]) || 50000;
+      const currency = emp[2] as string;
+      const hireDate = (emp[3] as string) || '2021-01-01';
+
+      const effDate = reviewDates[i % reviewDates.length];
+      if (effDate < hireDate) continue;
+
+      const increasePct = 0.05 + ((i % 11) * 0.01); // 5% to 15%
+      const previousSalary = currency === 'INR'
+        ? Math.round((currentSalary / (1 + increasePct)) / 10000) * 10000
+        : Math.round((currentSalary / (1 + increasePct)) / 500) * 500;
+
+      const reason = reasons[i % reasons.length];
+      const changedBy = approvers[i % approvers.length];
+      const comment = `${reason} approved in FY26 compensation cycle`;
+
+      db.run("UPDATE salary_records SET is_current = 0 WHERE employee_id = ?", [empId]);
+
+      const prevDate = '2025-01-01' < hireDate ? hireDate : '2025-01-01';
+      db.run(`
+        INSERT INTO salary_records (
+          employee_id, base_salary, previous_salary, currency_code, effective_date, is_current, reason, comment, changed_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, 0, 'Initial base', 'Previous compensation tier', ?, ?)
+      `, [empId, previousSalary, 0, currency, prevDate, changedBy, `${prevDate}T09:00:00Z`]);
+
+      db.run(`
+        INSERT INTO salary_records (
+          employee_id, base_salary, previous_salary, currency_code, effective_date, is_current, reason, comment, changed_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+      `, [empId, currentSalary, previousSalary, currency, effDate, reason, comment, changedBy, `${effDate}T10:00:00Z`]);
+    }
+
+    db.run("COMMIT;");
+    saveDatabase(db);
+  } catch (err) {
+    try { db.run("ROLLBACK;"); } catch {}
+    console.error("Error in ensurePeriodSalaryData:", err);
   }
 }
 
@@ -196,10 +291,10 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
     db.run("DELETE FROM employees;");
   }
 
-  // Multi-country angle: Exactly 2 countries (US ~69%, India ~31%)
+  // Multi-country angle: Exactly 2 countries (India ~69%, US ~31%)
   const countryConfigs = [
-    { country: 'US', currency: 'USD', rate: 1.0, weight: 0.69 },
-    { country: 'IN', currency: 'INR', rate: 0.012, weight: 0.31 }
+    { country: 'IN', currency: 'INR', rate: 0.012, weight: 0.69 },
+    { country: 'US', currency: 'USD', rate: 1.0, weight: 0.31 }
   ];
 
   const rolesByDept: Record<string, string[]> = {
@@ -231,16 +326,16 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
 
   const empStmt = db.prepare(`
     INSERT INTO employees (
-      employee_code, first_name, last_name, email, department_id,
+      id, employee_code, first_name, last_name, email, department_id,
       role_title, country_code, currency_code, pay_band_id, current_salary,
       employment_status, hire_date, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const salStmt = db.prepare(`
     INSERT INTO salary_records (
-      employee_id, base_salary, currency_code, effective_date, is_current
-    ) VALUES (?, ?, ?, ?, ?)
+      employee_id, base_salary, previous_salary, currency_code, effective_date, is_current, reason, comment, changed_by, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   // Showcase employees authentically representing our US and India hubs
@@ -300,8 +395,8 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       country: 'IN',
       currency: 'INR',
       rate: 0.012,
-      bandIdx: 1,
-      salary: 1850000,
+      bandIdx: 0,
+      salary: 720000,
       status: 'active',
       hireDate: '2023-01-20'
     },
@@ -402,10 +497,13 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
   // If this is starting from scratch, insert showcase employees first
   let countToGenerate = count;
   if (startId === 1) {
-    for (const sc of showcaseEmployees) {
+    for (let idx = 0; idx < showcaseEmployees.length; idx++) {
+      const sc = showcaseEmployees[idx];
+      const scId = startId + idx;
       const dept = deptList.find(d => d.name === sc.deptName) || deptList[0];
       const band = bandList[sc.bandIdx] || bandList[1];
       empStmt.run([
+        scId,
         sc.code,
         sc.first,
         sc.last,
@@ -421,25 +519,64 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
         now,
         now
       ]);
-
-      const empIdRes = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
       
       // Add a past salary record then current salary record to show history!
-      salStmt.run([empIdRes, Math.round(sc.salary * 0.9), sc.currency, sc.hireDate, 0]);
-      salStmt.run([empIdRes, sc.salary, sc.currency, '2024-01-01', 1]);
+      salStmt.run([
+        scId,
+        Math.round(sc.salary * 0.9),
+        Math.round(sc.salary * 0.8),
+        sc.currency,
+        sc.hireDate,
+        0,
+        'Annual review',
+        'Initial merit compensation review',
+        'HR Manager',
+        `${sc.hireDate}T10:00:00Z`
+      ]);
+      salStmt.run([
+        scId,
+        sc.salary,
+        Math.round(sc.salary * 0.9),
+        sc.currency,
+        '2026-09-21',
+        1,
+        sc.code === 'EMP-00002' ? 'Promotion' : (sc.code === 'EMP-00003' ? 'Market adjustment' : 'Annual review'),
+        sc.code === 'EMP-00002' ? 'Promoted to Senior Software Engineer' : 'Compensation adjustment',
+        'HR Manager',
+        '2026-09-21T14:30:00Z'
+      ]);
     }
     countToGenerate -= showcaseEmployees.length;
     startId += showcaseEmployees.length;
   }
 
-  // Generate remaining employees up to count: exactly 31% India and 69% US
+  // Country-grounded pay bands:
+  // India (INR): authentic Indian corporate/tech compensation scale
+  // US (USD): authentic US corporate/tech compensation scale
+  const inBands = [
+    { min: 450000, max: 750000 },     // L1 - Associate (avg ₹600k)
+    { min: 750000, max: 1350000 },    // L2 - Junior (avg ₹1.05M)
+    { min: 1350000, max: 2400000 },   // L3 - Mid-Level (avg ₹1.85M)
+    { min: 2400000, max: 4000000 },   // L4 - Senior (avg ₹3.2M)
+    { min: 4000000, max: 6800000 },   // L5 - Lead / Principal (avg ₹5.2M)
+  ];
+
+  const usBands = [
+    { min: 48000, max: 68000 },       // L1 - Associate (avg $58k)
+    { min: 68000, max: 98000 },       // L2 - Junior (avg $83k)
+    { min: 98000, max: 142000 },      // L3 - Mid-Level (avg $120k)
+    { min: 140000, max: 195000 },     // L4 - Senior (avg $167k)
+    { min: 195000, max: 275000 },     // L5 - Lead / Principal (avg $235k)
+  ];
+
+  // Generate remaining employees up to count: exactly 69% India and 31% US
   for (let i = 0; i < countToGenerate; i++) {
     const currentId = startId + i;
     const empCode = `EMP-${currentId.toString().padStart(5, '0')}`;
 
-    // 31% India, 69% US
-    const distRoll = Math.random();
-    const cConf = distRoll < 0.31 ? countryConfigs[0] : countryConfigs[1];
+    // 69% India, 31% US
+    const isIndia = Math.random() < 0.69;
+    const cConf = isIndia ? countryConfigs[0] : countryConfigs[1];
 
     // Generate authentic, localized names strictly aligned with employee country
     const { firstName, lastName, email } = generateCountryAlignedName(cConf.country, currentId);
@@ -470,14 +607,16 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
     const hireDay = (1 + Math.floor(Math.random() * 28)).toString().padStart(2, '0');
     const hireDate = `${hireYear}-${hireMonth}-${hireDay}`;
 
-    // Calculate base salary in local currency based on USD band range
-    const bandSpread = band.max - band.min;
-    const baseUsd = band.min + (Math.random() * 0.9 + 0.05) * bandSpread;
-    
-    // Convert to local currency deterministically
-    const localSalary = Math.round(baseUsd / cConf.rate);
+    // Calculate base salary directly in country currency based on country-grounded wage scale
+    const targetBand = isIndia ? inBands[bandIdx] : usBands[bandIdx];
+    const bandSpread = targetBand.max - targetBand.min;
+    const rawSalary = targetBand.min + Math.random() * bandSpread;
+    const localSalary = isIndia
+      ? Math.round(rawSalary / 10000) * 10000
+      : Math.round(rawSalary / 500) * 500;
 
     empStmt.run([
+      currentId,
       empCode,
       firstName,
       lastName,
@@ -494,16 +633,17 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       now
     ]);
 
-    const empIdRes = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
-
     // Past salary history
     const hasHistory = Math.random() < 0.4 && hireYear <= 2022;
     if (hasHistory) {
-      const pastSalary = Math.round(localSalary * (0.85 + Math.random() * 0.08));
-      salStmt.run([empIdRes, pastSalary, cConf.currency, hireDate, 0]);
-      salStmt.run([empIdRes, localSalary, cConf.currency, `${hireYear + 1}-04-01`, 1]);
+      const pastSalary = Math.round(localSalary * (0.88 + Math.random() * 0.05));
+      const previousBase = Math.round(pastSalary * 0.9);
+      const reasons = ['Annual review', 'Promotion', 'Market adjustment', 'Role change'];
+      const r = reasons[Math.floor(Math.random() * reasons.length)];
+      salStmt.run([currentId, pastSalary, previousBase, cConf.currency, hireDate, 0, 'Annual review', 'Initial compensation review', 'HR Manager', `${hireDate}T10:00:00Z`]);
+      salStmt.run([currentId, localSalary, pastSalary, cConf.currency, `${hireYear + 1}-04-01`, 1, r, 'Merit cycle adjustment', 'HR Manager', `${hireYear + 1}-04-01T10:00:00Z`]);
     } else {
-      salStmt.run([empIdRes, localSalary, cConf.currency, hireDate, 1]);
+      salStmt.run([currentId, localSalary, 0, cConf.currency, hireDate, 1, 'Initial compensation', 'Onboarding offer', 'HR Manager', `${hireDate}T10:00:00Z`]);
     }
   }
 

@@ -10,8 +10,8 @@ import { LoginModal } from './components/LoginModal';
 import { EmployeeDetailModal } from './components/EmployeeDetailModal';
 import { AddEmployeeModal } from './components/AddEmployeeModal';
 import { EditSalaryModal } from './components/EditSalaryModal';
+import { SalaryHistoryDrawer } from './components/SalaryHistoryDrawer';
 import { DocsModal } from './components/DocsModal';
-import { AboutView } from './components/AboutView';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import {
   Employee,
@@ -22,35 +22,46 @@ import {
   DashboardStats,
   ActivityItem,
   NotificationItem,
-  DateRangeFilter
+  DateRangeFilter,
+  AnalysisPeriodState
 } from './types';
+import { loadStoredPeriod, saveStoredPeriod } from './lib/periodUtils';
 import {
   CheckCircle2,
   AlertCircle,
-  Play,
-  Database,
-  RefreshCw,
-  Building,
-  Layers,
-  Sparkles,
   LayoutDashboard,
   Users,
-  CreditCard,
   BarChart3,
-  Menu,
-  Info
+  Settings
 } from 'lucide-react';
-import { formatCurrency } from './lib/utils';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('acme_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebarCollapse = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('acme_sidebar_collapsed', String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   // Demo Personas: 'hr.global' | 'hr.india' | 'employee'
   const [userRole, setUserRole] = useState<'hr.global' | 'hr.india' | 'employee'>('hr.global');
   const [userEmail, setUserEmail] = useState('hr.global@demo.com');
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [selectedPayrollCountry, setSelectedPayrollCountry] = useState<'US' | 'IN'>('IN');
 
   // Metadata & Stats
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -72,54 +83,47 @@ export default function App() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
 
+  // Shared Analysis Period State across Dashboard and Compensation Insights
+  const [analysisPeriod, setAnalysisPeriod] = useState<AnalysisPeriodState>(() => loadStoredPeriod());
+
+  const handlePeriodChange = (nextPeriod: AnalysisPeriodState) => {
+    setAnalysisPeriod(nextPeriod);
+    saveStoredPeriod(nextPeriod);
+  };
+
   // Modals & Drawers
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [salaryChangeEmployee, setSalaryChangeEmployee] = useState<Employee | null>(null);
+  const [historyEmployee, setHistoryEmployee] = useState<Employee | null>(null);
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isReseeding, setIsReseeding] = useState(false);
 
-  // Date Range state for filtering payroll data
-  const [selectedDateRange, setSelectedDateRange] = useState<DateRangeFilter>({
-    periodKey: 'may_2024',
-    label: 'May 1 – May 31, 2024',
-    startDate: '2024-05-01',
-    endDate: '2024-05-31'
-  });
-
-  // Notifications state with options to clear specific or all
+  // Notifications state
   const [notifications, setNotifications] = useState<NotificationItem[]>([
     {
       id: 'notif-1',
-      title: 'May 2024 Payroll Disbursed',
-      message: 'Direct deposit ACH batches successfully transmitted for 238 employees ($512,430.50). Next cycle scheduled May 31.',
-      time: '12m ago',
-      type: 'payroll',
+      title: 'Annual Compensation Review Prepared',
+      message: 'Global compensation budgets and band allocations refreshed across 10,000 active employees.',
+      time: '10m ago',
+      type: 'salary',
       isRead: false
     },
     {
       id: 'notif-2',
-      title: 'Salary Band Adjusted (Germany & India)',
-      message: 'L3 Senior Engineer compensation benchmark was updated to match European & APAC talent market rates.',
+      title: 'L3 Senior Engineer Benchmark Updated',
+      message: 'India and US market parity benchmarks synced with latest industry compensation percentiles.',
       time: '1h ago',
       type: 'salary',
       isRead: false
     },
     {
       id: 'notif-3',
-      title: 'Form 941 Quarterly Tax Filing Ready',
-      message: 'Statutory tax deductions of $72,540.30 reconciled with zero discrepancies for internal audit compliance.',
+      title: 'Audit Trail Verification Complete',
+      message: 'All historical salary modifications logged with timestamp and user justification.',
       time: '3h ago',
-      type: 'tax',
-      isRead: true
-    },
-    {
-      id: 'notif-4',
-      title: '10 New Employees Onboarded',
-      message: 'Bank account validation and multi-currency payroll profiles finalized for the new engineering cohort.',
-      time: '1d ago',
-      type: 'employee',
+      type: 'compensation',
       isRead: true
     }
   ]);
@@ -130,19 +134,6 @@ export default function App() {
 
   const handleClearAllNotifications = () => {
     setNotifications([]);
-  };
-
-  const handleDateRangeChange = async (newRange: DateRangeFilter) => {
-    setSelectedDateRange(newRange);
-    try {
-      const res = await fetch(`/api/dashboard/stats?period=${newRange.periodKey}`);
-      if (res.ok) {
-        const statsJson = await res.json();
-        setStats(statsJson);
-      }
-    } catch (err) {
-      console.error('Failed to fetch period stats:', err);
-    }
   };
 
   // Toast / notification state
@@ -167,10 +158,10 @@ export default function App() {
   };
 
   // Fetch stats & activity
-  const fetchDashboardData = async (periodKey: string = selectedDateRange.periodKey) => {
+  const fetchDashboardData = async () => {
     try {
       const [statsRes, actRes] = await Promise.all([
-        fetch(`/api/dashboard/stats?period=${periodKey}`),
+        fetch('/api/dashboard/stats'),
         fetch('/api/activities')
       ]);
       const statsJson = await statsRes.json();
@@ -232,7 +223,6 @@ export default function App() {
     if (email) setUserEmail(email);
     if (role === 'hr.india') {
       setSelectedCountry('IN');
-      setSelectedPayrollCountry('IN');
     } else if (role === 'hr.global') {
       setSelectedCountry('');
     }
@@ -258,7 +248,7 @@ export default function App() {
     hire_date: '2022-03-15',
     employment_status: 'active',
     created_at: '2022-03-15',
-    updated_at: '2024-05-01'
+    updated_at: '2026-09-01'
   };
 
   // Open single employee detail with fresh data from server
@@ -306,12 +296,22 @@ export default function App() {
     fetchDashboardData();
   };
 
-  // Edit Employee Salary (PUT /api/employees/:id/salary) with instant cache invalidation
-  const handleSaveSalary = async (id: number, newSalary: number) => {
+  // Auditable Salary Change (PUT /api/employees/:id/salary) with instant cache invalidation
+  const handleSaveSalary = async (
+    id: number,
+    data: {
+      new_salary: number;
+      currency_code: string;
+      effective_date: string;
+      reason: string;
+      comment?: string;
+      changed_by?: string;
+    }
+  ) => {
     const res = await fetch(`/api/employees/${id}/salary`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ current_salary: newSalary })
+      body: JSON.stringify(data)
     });
     if (!res.ok) {
       const errJson = await res.json();
@@ -321,34 +321,11 @@ export default function App() {
     if (selectedEmployee && selectedEmployee.id === id) {
       setSelectedEmployee(updated);
     }
-    showToast(`Updated salary for ${updated.first_name} ${updated.last_name} to ${updated.currency_code} ${Number(newSalary).toLocaleString()}`);
-    // Cache invalidation: immediately refresh both directory and dashboard metrics
+    showToast(
+      `Updated salary for ${updated.first_name} ${updated.last_name} (${data.reason})`
+    );
+    // Invalidate caches: refresh directory and dashboard metrics
     await Promise.all([fetchEmployees(), fetchDashboardData()]);
-  };
-
-  const handleRecordSalaryChange = async (id: number, data: any) => {
-    await handleSaveSalary(id, Number(data.base_salary || data.current_salary));
-  };
-
-  // Soft Delete Employee
-  const handleSoftDelete = async (emp: Employee) => {
-    if (!confirm(`Are you sure you want to soft-delete ${emp.first_name} ${emp.last_name} (${emp.employee_code})? This will mark the employee as inactive for audit preservation.`)) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/employees/${emp.id}`, { method: 'DELETE' });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error);
-      showToast(result.message || `Employee marked inactive`);
-      if (selectedEmployee && selectedEmployee.id === emp.id) {
-        setSelectedEmployee(result.employee);
-      }
-      fetchEmployees();
-      fetchDashboardData();
-    } catch (err: any) {
-      showToast(err.message || 'Failed to soft delete employee', 'error');
-    }
   };
 
   // Reseed / Scale 10,000 Employees
@@ -359,7 +336,7 @@ export default function App() {
     if (isNaN(targetCount) || targetCount <= 0) return;
 
     setIsReseeding(true);
-    showToast(`Generating ${targetCount.toLocaleString()} employees with realistic distributions...`);
+    showToast(`Generating ${targetCount.toLocaleString()} employees with 69% IN / 31% US distribution...`);
     try {
       const res = await fetch('/api/seed', {
         method: 'POST',
@@ -378,7 +355,7 @@ export default function App() {
     }
   };
 
-  const totalCount = employeesData?.pagination?.total || stats?.total_active_employees || 0;
+  const totalCount = employeesData?.pagination?.total || stats?.total_active_employees || 10000;
 
   return (
     <div className="flex min-h-screen bg-[#F8FAFC]">
@@ -390,32 +367,27 @@ export default function App() {
         currentRole={userRole}
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={handleToggleSidebarCollapse}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0">
+      <div className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-0">
         {/* Top Header */}
         <TopHeader
-          searchQuery={search}
-          onSearchChange={(q) => {
-            setSearch(q);
-            setPage(1);
-            if (activeTab !== 'employees' && activeTab !== 'dashboard') {
-              setActiveTab('employees');
-            }
-          }}
           onOpenAddModal={() => setIsAddModalOpen(true)}
           onReseed={handleReseed}
           employeeCount={totalCount}
           isReseeding={isReseeding}
           onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          selectedDateRange={selectedDateRange}
-          onDateRangeChange={handleDateRangeChange}
           unreadNotificationsCount={notifications.filter(n => !n.isRead).length || notifications.length}
           onOpenNotifications={() => setIsNotificationsOpen(true)}
           userRole={userRole}
           onOpenLoginModal={() => setIsLoginModalOpen(true)}
           onSwitchRole={handleSwitchRole}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebarCollapse={handleToggleSidebarCollapse}
+          activeTab={activeTab}
         />
 
         {/* Dynamic Page Content */}
@@ -446,19 +418,26 @@ export default function App() {
             />
           ) : (
             <>
-              {/* TAB 1: DASHBOARD */}
+              {/* TAB 1: EXECUTIVE DASHBOARD */}
               {activeTab === 'dashboard' && (
                 <DashboardView
-                  stats={stats}
-                  employeesData={employeesData}
-                  activities={activities}
-                  onSelectEmployee={handleOpenEmployeeDetail}
-                  onPageChange={(p) => setPage(p)}
-                  onRunPayroll={() => setActiveTab('employees')}
-                  onViewEmployees={() => setActiveTab('employees')}
-                  onViewReports={() => setActiveTab('reports')}
-                  currentPage={page}
-                  selectedDateRange={selectedDateRange}
+                  departments={departments}
+                  analysisPeriod={analysisPeriod}
+                  onPeriodChange={handlePeriodChange}
+                  onNavigateToEmployees={(country, dept) => {
+                    if (country && country !== 'all') setSelectedCountry(country);
+                    if (dept && dept !== 'all') setSelectedDept(dept);
+                    setActiveTab('employees');
+                  }}
+                  onOpenEditSalary={async (empId) => {
+                    try {
+                      const res = await fetch(`/api/employees/${empId}`);
+                      const emp = await res.json();
+                      setSalaryChangeEmployee(emp);
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
                 />
               )}
 
@@ -489,21 +468,32 @@ export default function App() {
                   onSelectEmployee={handleOpenEmployeeDetail}
                   onOpenAddModal={() => setIsAddModalOpen(true)}
                   onOpenSalaryChange={(emp) => setSalaryChangeEmployee(emp)}
-                  onSoftDelete={handleSoftDelete}
+                  onOpenHistory={(emp) => setHistoryEmployee(emp)}
                   isLoading={isLoadingEmployees}
                 />
               )}
 
-              {/* TAB 3: REPORTS & TRENDS */}
-              {activeTab === 'reports' && (
-                <ReportsView stats={stats} />
+              {/* TAB 3: COMPENSATION INSIGHTS */}
+              {activeTab === 'insights' && (
+                <ReportsView
+                  analysisPeriod={analysisPeriod}
+                  onPeriodChange={handlePeriodChange}
+                />
+              )}
+
+              {/* TAB 4: SETTINGS */}
+              {activeTab === 'settings' && (
+                <SettingsView
+                  onTriggerReseed={handleReseed}
+                  isReseeding={isReseeding}
+                />
               )}
             </>
           )}
         </main>
       </div>
 
-      {/* Modal 1: Employee Detail & Salary History */}
+      {/* Modal 1: Employee Detail Modal */}
       {selectedEmployee && (
         <EmployeeDetailModal
           employee={selectedEmployee}
@@ -511,8 +501,8 @@ export default function App() {
           payBands={payBands}
           onClose={() => setSelectedEmployee(null)}
           onOpenSalaryChange={(emp) => setSalaryChangeEmployee(emp)}
+          onOpenHistory={(emp) => setHistoryEmployee(emp)}
           onUpdateEmployee={handleUpdateEmployee}
-          onSoftDelete={handleSoftDelete}
         />
       )}
 
@@ -526,29 +516,47 @@ export default function App() {
         />
       )}
 
-      {/* Modal 3: Edit Employee Salary (Core Feature) */}
+      {/* Modal 3: Edit Employee Salary (Right-Side Auditable Slider/Drawer) */}
       {salaryChangeEmployee && (
         <EditSalaryModal
           isOpen={Boolean(salaryChangeEmployee)}
           employee={salaryChangeEmployee}
+          payBands={payBands}
           onClose={() => setSalaryChangeEmployee(null)}
           onSave={handleSaveSalary}
+          onViewHistory={(emp) => {
+            setSalaryChangeEmployee(null);
+            setHistoryEmployee(emp);
+          }}
         />
       )}
 
-      {/* Modal 4: Assessment Deliverable Docs Viewer */}
+      {/* Modal 4: Salary History & Audit Trail Drawer */}
+      {historyEmployee && (
+        <SalaryHistoryDrawer
+          isOpen={Boolean(historyEmployee)}
+          employee={historyEmployee}
+          onClose={() => setHistoryEmployee(null)}
+          onOpenEditSalary={(emp) => {
+            setHistoryEmployee(null);
+            setSalaryChangeEmployee(emp);
+          }}
+        />
+      )}
+
+      {/* Modal 5: Docs Modal */}
       {isDocsModalOpen && (
         <DocsModal onClose={() => setIsDocsModalOpen(false)} />
       )}
 
-      {/* Modal 5: Demo Persona Switcher & Login */}
+      {/* Modal 6: Demo Persona Switcher & Login */}
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         onLogin={handleSwitchRole}
       />
 
-      {/* Notification Drawer (Sidebar with smooth animation and item clearing) */}
+      {/* Notification Drawer */}
       <NotificationDrawer
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
@@ -557,22 +565,22 @@ export default function App() {
         onClearAll={handleClearAllNotifications}
       />
 
-      {/* Mobile Bottom Quick Navigation Bar (Visible only on < lg screens) */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-1.5 flex items-center justify-around shadow-lg">
+      {/* Mobile Bottom Quick Navigation Bar */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-3 py-1.5 flex items-center justify-around shadow-lg">
         <button
           onClick={() => handleTabChange('dashboard')}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[54px] ${
-            activeTab === 'dashboard' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-800'
+          className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[56px] cursor-pointer ${
+            activeTab === 'dashboard' ? 'text-blue-600 font-bold bg-blue-50/80 shadow-2xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
           }`}
         >
           <LayoutDashboard className={`w-5 h-5 mb-0.5 ${activeTab === 'dashboard' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span>Home</span>
+          <span>Dashboard</span>
         </button>
 
         <button
           onClick={() => handleTabChange('employees')}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[54px] relative ${
-            activeTab === 'employees' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-800'
+          className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[56px] relative cursor-pointer ${
+            activeTab === 'employees' ? 'text-blue-600 font-bold bg-blue-50/80 shadow-2xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
           }`}
         >
           <Users className={`w-5 h-5 mb-0.5 ${activeTab === 'employees' ? 'stroke-[2.5]' : 'stroke-2'}`} />
@@ -583,13 +591,23 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => handleTabChange('reports')}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[54px] ${
-            activeTab === 'reports' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-800'
+          onClick={() => handleTabChange('insights')}
+          className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[56px] cursor-pointer ${
+            activeTab === 'insights' ? 'text-blue-600 font-bold bg-blue-50/80 shadow-2xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
           }`}
         >
-          <BarChart3 className={`w-5 h-5 mb-0.5 ${activeTab === 'reports' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span>Reports</span>
+          <BarChart3 className={`w-5 h-5 mb-0.5 ${activeTab === 'insights' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+          <span>Insights</span>
+        </button>
+
+        <button
+          onClick={() => handleTabChange('settings')}
+          className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl text-[11px] font-semibold transition min-h-[44px] min-w-[56px] cursor-pointer ${
+            activeTab === 'settings' ? 'text-blue-600 font-bold bg-blue-50/80 shadow-2xs' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <Settings className={`w-5 h-5 mb-0.5 ${activeTab === 'settings' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+          <span>Settings</span>
         </button>
       </nav>
     </div>

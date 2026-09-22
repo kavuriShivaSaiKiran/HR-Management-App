@@ -94,7 +94,121 @@ apiRouter.put('/employees/:id', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/employees/:id/salary - update current salary directly in SQLite
+// GET /api/dashboard - main dashboard route with analysis period filter
+apiRouter.get('/dashboard', async (req: Request, res: Response) => {
+  try {
+    const countryCode = req.query.country_code as string;
+    const departmentId = req.query.department_id as string;
+    const startDate = req.query.start_date as string;
+    const endDate = req.query.end_date as string;
+    const asOfDate = req.query.as_of_date as string;
+
+    const summary = await EmployeeRepository.getDashboardSummary(
+      countryCode,
+      departmentId,
+      startDate,
+      endDate,
+      asOfDate
+    );
+    res.json(summary);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/dashboard/summary - dynamic aggregated summary with country, department, & period filtering
+apiRouter.get('/dashboard/summary', async (req: Request, res: Response) => {
+  try {
+    const countryCode = req.query.country_code as string;
+    const departmentId = req.query.department_id as string;
+    const startDate = req.query.start_date as string;
+    const endDate = req.query.end_date as string;
+    const asOfDate = req.query.as_of_date as string;
+
+    const summary = await EmployeeRepository.getDashboardSummary(
+      countryCode,
+      departmentId,
+      startDate,
+      endDate,
+      asOfDate
+    );
+    res.json(summary);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/dashboard/recent-changes - recent auditable salary modifications
+apiRouter.get('/dashboard/recent-changes', async (req: Request, res: Response) => {
+  try {
+    const limit = Number(req.query.limit) || 10;
+    const countryCode = req.query.country_code as string;
+    const departmentId = req.query.department_id as string;
+    const startDate = req.query.start_date as string;
+    const endDate = req.query.end_date as string;
+
+    const changes = await EmployeeRepository.getRecentSalaryChanges(
+      limit,
+      countryCode,
+      departmentId,
+      startDate,
+      endDate
+    );
+    res.json(changes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/employees/:id/history - full chronological salary history
+apiRouter.get('/employees/:id/history', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid employee ID' });
+    }
+    const history = await EmployeeRepository.getEmployeeSalaryHistory(id);
+    res.json(history);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/insights - compensation insights overview, department, country, salary bands, levels with period filter
+apiRouter.get('/insights', async (req: Request, res: Response) => {
+  try {
+    const countryCode = req.query.country_code as string;
+    const departmentId = req.query.department_id as string;
+    const startDate = req.query.start_date as string;
+    const endDate = req.query.end_date as string;
+    const asOfDate = req.query.as_of_date as string;
+
+    const insights = await EmployeeRepository.getCompensationInsights(
+      countryCode,
+      departmentId,
+      startDate,
+      endDate,
+      asOfDate
+    );
+    res.json(insights);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/insights/question - deterministic compensation query execution
+apiRouter.get('/insights/question', async (req: Request, res: Response) => {
+  try {
+    const questionId = (req.query.id as string) || '1';
+    const threshold = Number(req.query.threshold) || 100000;
+    const answer = await EmployeeRepository.answerCompensationQuestion(questionId, threshold);
+    res.json(answer);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/employees/:id/salary - update current salary directly in SQLite with complete audit trail
 apiRouter.put('/employees/:id/salary', async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
@@ -102,15 +216,51 @@ apiRouter.put('/employees/:id/salary', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid employee ID' });
     }
 
-    const currentSalary = req.body.current_salary !== undefined 
-      ? Number(req.body.current_salary) 
-      : (req.body.base_salary !== undefined ? Number(req.body.base_salary) : NaN);
+    const newSalary = req.body.new_salary !== undefined
+      ? Number(req.body.new_salary)
+      : (req.body.current_salary !== undefined 
+          ? Number(req.body.current_salary) 
+          : (req.body.base_salary !== undefined ? Number(req.body.base_salary) : NaN));
 
-    if (isNaN(currentSalary) || currentSalary <= 0) {
-      return res.status(400).json({ error: 'Valid positive current_salary is required' });
+    if (isNaN(newSalary) || newSalary <= 0) {
+      return res.status(400).json({ error: 'Valid positive new_salary is required' });
     }
 
-    const employee = await EmployeeRepository.updateEmployeeSalary(id, currentSalary, req.body.currency_code);
+    const employee = await EmployeeRepository.updateEmployeeSalary(id, {
+      new_salary: newSalary,
+      currency_code: req.body.currency_code,
+      effective_date: req.body.effective_date,
+      reason: req.body.reason,
+      comment: req.body.comment,
+      changed_by: req.body.changed_by
+    });
+    res.json(employee);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/employees/:id/salary-change - alternative endpoint for salary change
+apiRouter.post('/employees/:id/salary-change', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid employee ID' });
+    }
+
+    const newSalary = Number(req.body.new_salary || req.body.base_salary);
+    if (isNaN(newSalary) || newSalary <= 0) {
+      return res.status(400).json({ error: 'Valid positive new_salary is required' });
+    }
+
+    const employee = await EmployeeRepository.updateEmployeeSalary(id, {
+      new_salary: newSalary,
+      currency_code: req.body.currency_code,
+      effective_date: req.body.effective_date,
+      reason: req.body.reason,
+      comment: req.body.comment,
+      changed_by: req.body.changed_by
+    });
     res.json(employee);
   } catch (err: any) {
     res.status(400).json({ error: err.message });

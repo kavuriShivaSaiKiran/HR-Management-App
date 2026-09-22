@@ -32,14 +32,15 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
 }) => {
   const getIcon = (type: NotificationItem['type']) => {
     switch (type) {
-      case 'payroll':
-        return <CreditCard className="w-4 h-4 text-blue-600" />;
+      case 'compensation':
+        return <BadgeDollarSign className="w-4 h-4 text-blue-600" />;
       case 'employee':
         return <Users className="w-4 h-4 text-emerald-600" />;
       case 'salary':
         return <BadgeDollarSign className="w-4 h-4 text-amber-600" />;
-      case 'tax':
+      case 'review':
         return <Receipt className="w-4 h-4 text-indigo-600" />;
+      case 'system':
       default:
         return <Info className="w-4 h-4 text-slate-600" />;
     }
@@ -47,14 +48,15 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
 
   const getBadgeColor = (type: NotificationItem['type']) => {
     switch (type) {
-      case 'payroll':
+      case 'compensation':
         return 'bg-blue-50 text-blue-700 border-blue-200';
       case 'employee':
         return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       case 'salary':
         return 'bg-amber-50 text-amber-700 border-amber-200';
-      case 'tax':
+      case 'review':
         return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+      case 'system':
       default:
         return 'bg-slate-100 text-slate-700 border-slate-200';
     }
@@ -97,7 +99,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                       </span>
                     )}
                   </h3>
-                  <p className="text-xs text-slate-400">Payroll runs, salary updates & compliance alerts</p>
+                  <p className="text-xs text-slate-400">Salary adjustments, band updates & audit records</p>
                 </div>
               </div>
 

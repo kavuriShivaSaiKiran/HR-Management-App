@@ -1,1300 +1,954 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence, Variants } from 'motion/react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Wallet,
   Users,
-  Clock,
-  FileText,
-  TrendingUp,
-  ChevronLeft,
-  ChevronRight,
-  Filter,
-  Download,
-  Play,
-  CheckCircle2,
-  AlertCircle,
-  Clock3,
-  Calendar as CalendarIcon,
-  Globe,
-  Check,
-  CalendarDays,
-  RotateCcw,
-  X,
   DollarSign,
-  UserCheck
+  TrendingUp,
+  Globe,
+  Building2,
+  Layers,
+  ArrowUpRight,
+  ArrowDownRight,
+  Calendar,
+  Filter,
+  RefreshCw,
+  CheckCircle2,
+  Clock,
+  Briefcase,
+  ChevronRight,
+  Activity,
+  Award,
+  FileCheck2,
+  Info
 } from 'lucide-react';
 import {
-  AreaChart,
-  Area,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell
+  Cell,
+  LineChart,
+  Line,
+  CartesianGrid,
+  Legend,
+  AreaChart,
+  Area
 } from 'recharts';
-import { DashboardStats, Employee, ActivityItem, PaginatedResponse, DateRangeFilter } from '../types';
+import {
+  DashboardResponse,
+  Department,
+  RecentSalaryChange,
+  AnalysisPeriodState,
+  PeriodTrendPoint
+} from '../types';
 import { formatCurrency, cn, getInitials } from '../lib/utils';
+import { formatAsOfDate, DEFAULT_AS_OF_DATE, loadStoredPeriod } from '../lib/periodUtils';
+import { AnalysisPeriodFilter } from './AnalysisPeriodFilter';
 
 interface DashboardViewProps {
-  stats: DashboardStats | null;
-  employeesData: PaginatedResponse<Employee> | null;
-  activities: ActivityItem[];
-  onSelectEmployee: (emp: Employee) => void;
-  onPageChange: (page: number) => void;
-  onRunPayroll?: () => void;
-  onViewEmployees?: () => void;
-  onStartCountryPayroll?: (country: 'US' | 'IN') => void;
-  onViewReports?: () => void;
-  currentPage: number;
-  selectedDateRange?: DateRangeFilter;
-  onCountryFilterChange?: (country: string) => void;
-  initialCountry?: string;
+  onNavigateToEmployees: (countryFilter?: string, deptFilter?: string) => void;
+  onOpenEditSalary?: (employeeId: number) => void;
+  departments: Department[];
+  analysisPeriod?: AnalysisPeriodState;
+  onPeriodChange?: (nextPeriod: AnalysisPeriodState) => void;
 }
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
-
-const SHORT_MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-];
-
-// Seasonal variance multipliers for realistic month-over-month payroll calculation
-const MONTH_FACTORS = [0.96, 0.97, 0.98, 0.99, 1.00, 1.01, 1.015, 1.02, 1.03, 1.04, 1.055, 1.09];
-const YEAR_FACTORS: Record<number, number> = {
-  2024: 1.0,
-  2025: 1.042,
-  2026: 1.084,
-  2027: 1.135
-};
-
 export const DashboardView: React.FC<DashboardViewProps> = ({
-  stats,
-  employeesData,
-  activities,
-  onSelectEmployee,
-  onPageChange,
-  onRunPayroll,
-  onViewEmployees,
-  onStartCountryPayroll,
-  onViewReports,
-  currentPage,
-  selectedDateRange,
-  onCountryFilterChange,
-  initialCountry = 'all'
+  onNavigateToEmployees,
+  onOpenEditSalary,
+  departments,
+  analysisPeriod: externalPeriod,
+  onPeriodChange: externalOnPeriodChange
 }) => {
-  // Top Filter Pane State: Country and Date (Month & Year)
-  const [selectedCountry, setSelectedCountry] = useState<string>(initialCountry);
-  const [selectedMonth, setSelectedMonth] = useState<number>(8); // September (0-indexed: 8)
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [internalPeriod, setInternalPeriod] = useState<AnalysisPeriodState>(() => loadStoredPeriod());
+  const periodState = externalPeriod || internalPeriod;
 
-  // Employee Payroll Card local filters (initially affected by page filters, but card changes do NOT affect page filters)
-  const [tableCountry, setTableCountry] = useState<string>(initialCountry);
-  const [tableMonth, setTableMonth] = useState<number>(8);
-  const [tableYear, setTableYear] = useState<number>(2026);
-
-  // Top page filters initially and reactively update the Employee Payroll card filters
-  useEffect(() => {
-    setTableCountry(selectedCountry);
-    setDashboardPage(1);
-  }, [selectedCountry]);
-
-  useEffect(() => {
-    setTableMonth(selectedMonth);
-  }, [selectedMonth]);
-
-  useEffect(() => {
-    setTableYear(selectedYear);
-  }, [selectedYear]);
-
-  // Local table state to isolate Dashboard pagination & employees from global app state
-  const [dashboardPage, setDashboardPage] = useState<number>(currentPage || 1);
-  const [dashboardEmployees, setDashboardEmployees] = useState<any[]>(employeesData?.data || []);
-  const [dashboardTotalCount, setDashboardTotalCount] = useState<number>(employeesData?.pagination?.total || 10000);
-  const [dashboardTotalPages, setDashboardTotalPages] = useState<number>(employeesData?.pagination?.total_pages || 1000);
-
-  // Secondary toggles
-  const [trendPeriod, setTrendPeriod] = useState<'6m' | '12m'>('6m');
-  const [isPageLoading, setIsPageLoading] = useState(false);
-  const [isTableFilterOpen, setIsTableFilterOpen] = useState(false);
-
-  // Country changes in top pane
-  const handleCountryChange = (country: string) => {
-    setSelectedCountry(country);
-  };
-
-  // Country changes in Employee Payroll card toolbar ONLY (does NOT alter top page filters)
-  const handleTableCountryChange = (country: string) => {
-    setTableCountry(country);
-    setDashboardPage(1);
-  };
-
-  // Fetch table data locally whenever dashboardPage or tableCountry changes
-  useEffect(() => {
-    let isMounted = true;
-    const fetchDashboardTable = async () => {
-      setIsPageLoading(true);
-      try {
-        const countryParam = tableCountry !== 'all' ? `&country_code=${tableCountry}` : '';
-        const res = await fetch(`/api/employees?page=${dashboardPage}&limit=10${countryParam}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (isMounted) {
-            setDashboardEmployees(json.data || []);
-            setDashboardTotalCount(json.pagination?.total || (tableCountry === 'US' ? 3100 : tableCountry === 'IN' ? 6900 : 10000));
-            setDashboardTotalPages(json.pagination?.total_pages || 1);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch dashboard table employees:', err);
-      } finally {
-        if (isMounted) setIsPageLoading(false);
-      }
-    };
-
-    fetchDashboardTable();
-    return () => {
-      isMounted = false;
-    };
-  }, [dashboardPage, tableCountry]);
-
-  // Base monthly payroll numbers from database
-  const baseMonthlyAll = stats?.total_payroll_month || 78092928;
-  const baseMonthlyUS = 24239333; // ~3,100 employees in US
-  const baseMonthlyIN_USD = 53853594; // ~6,900 employees in India in USD equivalent
-  const baseMonthlyIN_INR = 4487799527; // ~₹448.8 Cr in local INR
-
-  // Combined calculation factor based strictly on the selected month & year
-  const currentMonthFactor = MONTH_FACTORS[selectedMonth] ?? 1.0;
-  const currentYearFactor = YEAR_FACTORS[selectedYear] ?? 1.084;
-  const calcFactor = currentMonthFactor * currentYearFactor;
-
-  // Dynamically calculated payroll & deductions for the selected month, year, and country
-  const calculatedPayrollAll = baseMonthlyAll * calcFactor;
-  const calculatedDeductionsAll = (stats?.tax_deductions || 11050149) * calcFactor;
-
-  const calculatedPayrollUS = baseMonthlyUS * calcFactor;
-  const calculatedDeductionsUS = calculatedPayrollUS * 0.1415;
-
-  const calculatedPayrollIN_INR = Math.round(baseMonthlyIN_INR * calcFactor);
-  const calculatedPayrollIN_USD = baseMonthlyIN_USD * calcFactor;
-  const calculatedDeductionsIN_INR = Math.round(calculatedPayrollIN_INR * 0.1415);
-  const calculatedDeductionsIN_USD = calculatedPayrollIN_USD * 0.1415;
-
-  // Selected date parameters
-  const daysInSelectedMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
-  const currentMonthName = MONTH_NAMES[selectedMonth];
-  const currentShortMonth = SHORT_MONTHS[selectedMonth];
-  const formattedCycleDate = `${currentShortMonth} ${daysInSelectedMonth}, ${selectedYear}`;
-  const isPastCycle = selectedYear < 2026 || (selectedYear === 2026 && selectedMonth < 8);
-
-  // Handle smooth page changes local to Dashboard
-  const handlePageChange = (newPage: number) => {
-    if (newPage === dashboardPage || newPage < 1 || newPage > dashboardTotalPages) return;
-    setDashboardPage(newPage);
-  };
-
-  // Dynamic Salary Breakdown based on Country, Month & Year
-  let breakdownGross = calculatedPayrollAll * 1.20;
-  let breakdownDeductions = calculatedDeductionsAll;
-  let breakdownBonuses = calculatedPayrollAll * 0.07;
-  let breakdownNet = calculatedPayrollAll;
-  let breakdownCurrency = 'USD';
-  let breakdownTotalFormatted = formatCurrency(calculatedPayrollAll, 'USD');
-
-  if (selectedCountry === 'US') {
-    breakdownGross = calculatedPayrollUS * 1.20;
-    breakdownDeductions = calculatedDeductionsUS;
-    breakdownBonuses = calculatedPayrollUS * 0.07;
-    breakdownNet = calculatedPayrollUS;
-    breakdownCurrency = 'USD';
-    breakdownTotalFormatted = formatCurrency(calculatedPayrollUS, 'USD');
-  } else if (selectedCountry === 'IN') {
-    breakdownGross = calculatedPayrollIN_INR * 1.20;
-    breakdownDeductions = calculatedDeductionsIN_INR;
-    breakdownBonuses = calculatedPayrollIN_INR * 0.07;
-    breakdownNet = calculatedPayrollIN_INR;
-    breakdownCurrency = 'INR';
-    breakdownTotalFormatted = formatCurrency(calculatedPayrollIN_INR, 'INR');
-  }
-
-  const dynamicBreakdownData = [
-    { name: 'Gross Salary', value: breakdownGross, pct: '60.5%' },
-    { name: 'Deductions', value: breakdownDeductions, pct: '7.1%' },
-    { name: 'Bonuses', value: breakdownBonuses, pct: '3.5%' },
-    { name: 'Net Salary', value: breakdownNet, pct: '50.3%' },
-  ];
-  const BREAKDOWN_COLORS = ['#3b82f6', '#f43f5e', '#eab308', '#10b981'];
-
-  // Dynamic Payroll Trend Data ending at the selected Month and Year
-  const numTrendMonths = trendPeriod === '12m' ? 12 : 6;
-  const dynamicTrendData: Array<{ month: string; amount: number; local_amount: number }> = [];
-
-  for (let i = numTrendMonths - 1; i >= 0; i--) {
-    const pointDate = new Date(selectedYear, selectedMonth - i, 1);
-    const mIdx = pointDate.getMonth();
-    const yr = pointDate.getFullYear();
-    const label = `${SHORT_MONTHS[mIdx]} '${String(yr).slice(-2)}`;
-    const pointFactor = (MONTH_FACTORS[mIdx] ?? 1.0) * (YEAR_FACTORS[yr] ?? 1.0);
-
-    if (selectedCountry === 'IN') {
-      dynamicTrendData.push({
-        month: label,
-        amount: Math.round(baseMonthlyIN_USD * pointFactor),
-        local_amount: Math.round(baseMonthlyIN_INR * pointFactor)
-      });
-    } else if (selectedCountry === 'US') {
-      dynamicTrendData.push({
-        month: label,
-        amount: Math.round(baseMonthlyUS * pointFactor),
-        local_amount: Math.round(baseMonthlyUS * pointFactor)
-      });
+  const handlePeriodChange = (nextPeriod: AnalysisPeriodState) => {
+    if (externalOnPeriodChange) {
+      externalOnPeriodChange(nextPeriod);
     } else {
-      dynamicTrendData.push({
-        month: label,
-        amount: Math.round(baseMonthlyAll * pointFactor),
-        local_amount: Math.round(baseMonthlyAll * pointFactor)
-      });
-    }
-  }
-
-  const activeTrendCurrency = selectedCountry === 'IN' ? 'INR' : 'USD';
-
-  // Dynamic Payroll Calendar generation based strictly on selected Month & Year
-  const firstDayOfWeek = new Date(selectedYear, selectedMonth, 1).getDay();
-  const prevMonthDaysTotal = new Date(selectedYear, selectedMonth, 0).getDate();
-  const calendarCells: Array<{
-    day: number;
-    isPrev?: boolean;
-    isNext?: boolean;
-    isPayday?: boolean;
-    isUpcoming?: boolean;
-    isCurrentMonth?: boolean;
-  }> = [];
-
-  // Trailing previous month days
-  for (let i = firstDayOfWeek - 1; i >= 0; i--) {
-    calendarCells.push({ day: prevMonthDaysTotal - i, isPrev: true });
-  }
-  // Days of current selected month
-  for (let d = 1; d <= daysInSelectedMonth; d++) {
-    calendarCells.push({
-      day: d,
-      isPayday: d === 15,
-      isUpcoming: d === daysInSelectedMonth,
-      isCurrentMonth: true
-    });
-  }
-  // Trailing next month days to align grid to 7 columns
-  const remainingCells = 7 - (calendarCells.length % 7);
-  if (remainingCells < 7) {
-    for (let n = 1; n <= remainingCells; n++) {
-      calendarCells.push({ day: n, isNext: true });
-    }
-  }
-
-  // Employee table lists & count (isolated to DashboardView)
-  const totalEmployeesCount = dashboardTotalCount;
-  const displayEmployees = dashboardEmployees.length > 0 ? dashboardEmployees : (employeesData?.data || []);
-  const totalPages = dashboardTotalPages;
-
-  // Table specific date & status parameters (derived from tableMonth & tableYear)
-  const tableShortMonth = SHORT_MONTHS[tableMonth];
-  const tableDaysInMonth = new Date(tableYear, tableMonth + 1, 0).getDate();
-  const isTablePastCycle = tableYear < 2026 || (tableYear === 2026 && tableMonth < 8);
-
-  // Status badge
-  const getStatusBadge = (status?: string, index: number = 0) => {
-    const paymentStatus = isTablePastCycle ? 'Paid' : (index === 2 ? 'Processing' : index === 3 ? 'Pending' : 'Paid');
-    if (paymentStatus === 'Paid') {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          Paid
-        </span>
-      );
-    }
-    if (paymentStatus === 'Processing') {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-          <Clock3 className="w-3.5 h-3.5 text-blue-600" />
-          Processing
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-        <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-        Pending
-      </span>
-    );
-  };
-
-  // Animation variants
-  const containerVariants: Variants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.06,
-        delayChildren: 0.02
-      }
+      setInternalPeriod(nextPeriod);
     }
   };
 
-  const itemVariants: Variants = {
-    hidden: { opacity: 0, y: 12 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: 'easeOut' } }
-  };
+  const [selectedCountry, setSelectedCountry] = useState<string>('all');
+  const [selectedDept, setSelectedDept] = useState<string>('all');
+  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const countryLabel = selectedCountry === 'all'
-    ? 'All Entities'
-    : selectedCountry === 'US'
-      ? 'United States'
-      : 'India';
+  const fetchDashboard = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (selectedCountry !== 'all') params.append('country_code', selectedCountry);
+      if (selectedDept !== 'all') params.append('department_id', selectedDept);
+      if (periodState.startDate) params.append('start_date', periodState.startDate);
+      if (periodState.endDate) params.append('end_date', periodState.endDate);
+      if (periodState.asOfDate) params.append('as_of_date', periodState.asOfDate);
+
+      const res = await fetch(`/api/dashboard?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      const data: DashboardResponse = await res.json();
+      setDashboardData(data);
+    } catch (err: any) {
+      console.error('Failed to load dashboard data:', err);
+      setError(err.message || 'Failed to load compensation summary');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedCountry, selectedDept, periodState]);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, [fetchDashboard]);
+
+  const COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe'];
+  const formattedAsOf = formatAsOfDate(periodState.asOfDate);
+  const period = dashboardData?.period_analysis;
+  const prevComp = period?.previous_period_comparison;
 
   return (
-    <motion.div
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-      className="space-y-6 pb-12"
-    >
-      {/* 1. TOP FILTER PANE: Date & Country Filter with All Option */}
-      <motion.div
-        variants={itemVariants}
-        className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs"
-      >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          {/* Filter Description & Active Pill */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold border border-blue-100 shrink-0">
-              <Filter className="w-5 h-5" />
+    <div className="space-y-6 pb-12">
+      {/* 1. Minimal Page Header with Shared Analysis Period Filter & Global Filters */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white px-4 py-3 sm:px-5 sm:py-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
+        <div className="min-w-0">
+          <h1 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 truncate">
+            Compensation Dashboard
+          </h1>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-0.5">
+            <span>
+              Period: <strong className="text-blue-600 font-semibold">{periodState.label}</strong>
+            </span>
+            <span className="text-slate-300">•</span>
+            <span>
+              As of <strong className="text-slate-700 font-semibold">{formattedAsOf}</strong>
+            </span>
+            <span className="text-slate-300 hidden sm:inline">•</span>
+            <span className="text-slate-400 hidden sm:inline font-medium">10,000 Employees</span>
+          </div>
+        </div>
+
+        {/* Global Filter Bar: All filters preserved */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Analysis Period Filter Dropdown */}
+          <AnalysisPeriodFilter
+            value={periodState}
+            onChange={handlePeriodChange}
+            showSubtitle={false}
+          />
+
+          {/* Country Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 min-h-[38px] sm:min-h-0 flex-1 sm:flex-initial">
+            <Globe className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap hidden sm:inline">Country:</span>
+            <select
+              value={selectedCountry}
+              onChange={(e) => setSelectedCountry(e.target.value)}
+              className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer w-full"
+            >
+              <option value="all">All Countries</option>
+              <option value="IN">India Hub (69%)</option>
+              <option value="US">US Hub (31%)</option>
+            </select>
+          </div>
+
+          {/* Department Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 min-h-[38px] sm:min-h-0 flex-1 sm:flex-initial">
+            <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap hidden sm:inline">Dept:</span>
+            <select
+              value={selectedDept}
+              onChange={(e) => setSelectedDept(e.target.value)}
+              className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer w-full"
+            >
+              <option value="all">All Depts</option>
+              {departments.map((d) => (
+                <option key={d.id} value={String(d.id)}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => {
+              setSelectedCountry('all');
+              setSelectedDept('all');
+              fetchDashboard();
+            }}
+            className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition min-h-[38px] min-w-[38px] flex items-center justify-center"
+            title="Reset filters and refresh metrics"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin text-blue-600")} />
+          </button>
+
+          <button
+            onClick={() => onNavigateToEmployees(selectedCountry, selectedDept)}
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition shadow-2xs min-h-[38px] sm:min-h-0"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Directory</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Loading Skeleton */}
+      {isLoading && !dashboardData && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="h-28 bg-white rounded-2xl border border-slate-200/80 animate-pulse p-4 sm:p-5">
+              <div className="h-4 w-20 bg-slate-100 rounded mb-3" />
+              <div className="h-7 w-28 bg-slate-200 rounded" />
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* 2. CURRENT-STATE METRICS (Labeled As of [date] according to spec) */}
+      {dashboardData && (
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Current-State Metrics
+              </span>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                As of {formattedAsOf}
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-400 hidden sm:inline">
+              Point-in-time organizational snapshot
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
+            {/* Current Employee Count */}
+            <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between hover:border-blue-200 transition">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Current Headcount
+                </span>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </div>
+              </div>
+              <div className="mt-2 sm:mt-3">
+                <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  {dashboardData.total_employees.toLocaleString()}
+                </div>
+                <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5 truncate">
+                  As of {formattedAsOf}
+                </p>
+              </div>
+            </div>
+
+            {/* Current Total Annual Compensation */}
+            <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between hover:border-blue-200 transition">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Total Annual Comp
+                </span>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                  <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </div>
+              </div>
+              <div className="mt-2 sm:mt-3">
+                <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  ${(dashboardData.total_annual_compensation_usd / 1000000).toFixed(2)}M
+                </div>
+                <p className="text-[10px] sm:text-[11px] text-emerald-600 font-semibold mt-0.5 truncate">
+                  As of {formattedAsOf}
+                </p>
+              </div>
+            </div>
+
+            {/* Current Average Salary */}
+            <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between hover:border-blue-200 transition">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Current Avg Salary
+                </span>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                  <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </div>
+              </div>
+              <div className="mt-2 sm:mt-3">
+                <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  ${dashboardData.average_annual_salary_usd.toLocaleString()}
+                </div>
+                <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5 truncate">
+                  As of {formattedAsOf}
+                </p>
+              </div>
+            </div>
+
+            {/* Current Median Salary */}
+            <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between hover:border-blue-200 transition">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Current Median Salary
+                </span>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                  <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </div>
+              </div>
+              <div className="mt-2 sm:mt-3">
+                <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  ${dashboardData.median_annual_salary_usd.toLocaleString()}
+                </div>
+                <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5 truncate">
+                  As of {formattedAsOf}
+                </p>
+              </div>
+            </div>
+
+            {/* Current Hubs Breakdown */}
+            <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between hover:border-blue-200 transition col-span-1 sm:col-span-2 md:col-span-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Workforce Hubs
+                </span>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                  <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </div>
+              </div>
+              <div className="mt-2 sm:mt-3">
+                <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  {dashboardData.countries_count} Entities
+                </div>
+                <p className="text-[10px] sm:text-[11px] text-amber-600 font-semibold mt-0.5 truncate">
+                  India (69%) & US (31%)
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. PERIOD-CONTROLLED ACTIVITY METRICS SECTION */}
+      {period && (
+        <div className="bg-slate-50/70 border border-blue-200/70 rounded-2xl p-4 sm:p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-100 pb-3">
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-900">Dashboard Filter Controls</h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                  Real-time Sync
+                <Activity className="w-4 h-4 text-blue-600" />
+                <h2 className="text-sm sm:text-base font-bold text-slate-900">
+                  Analysis Period Activity: {period.period_label}
+                </h2>
+                <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase rounded-full bg-blue-100 text-blue-700">
+                  {period.is_snapshot ? 'Real-Time Snapshot' : `${period.start_date} → ${period.end_date}`}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Current Filter: <span className="font-bold text-slate-800">{countryLabel}</span> &bull; <span className="font-bold text-blue-600">{currentMonthName} {selectedYear}</span>
+                {period.is_snapshot
+                  ? 'Showing live organizational state as of today. Select a review period (e.g. Last 6 months) to analyze adjustment velocity and cycle comparisons.'
+                  : `Metrics, salary changes, review activity, and trend curves filtered for ${period.period_label}.`}
               </p>
             </div>
-          </div>
 
-          {/* Right Controls: Country segmented picker + Date (Month & Year) Picker */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Country Filter (All, US, India) */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80">
-              <button
-                type="button"
-                onClick={() => handleCountryChange('all')}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5",
-                  selectedCountry === 'all'
-                    ? "bg-white text-slate-900 shadow-2xs font-bold"
-                    : "text-slate-600 hover:text-slate-900"
-                )}
-              >
-                <Globe className="w-3.5 h-3.5 text-blue-600" />
-                <span>All</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCountryChange('US')}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5",
-                  selectedCountry === 'US'
-                    ? "bg-white text-slate-900 shadow-2xs font-bold"
-                    : "text-slate-600 hover:text-slate-900"
-                )}
-              >
-                <span>🇺🇸</span>
-                <span>US</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCountryChange('IN')}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5",
-                  selectedCountry === 'IN'
-                    ? "bg-white text-slate-900 shadow-2xs font-bold"
-                    : "text-slate-600 hover:text-slate-900"
-                )}
-              >
-                <span>🇮🇳</span>
-                <span>India</span>
-              </button>
-            </div>
-
-            {/* Date / Calendar Filter: Month and Year Selection Only */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs">
-              <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
-
-              {/* Month Selector */}
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                className="text-xs font-bold text-slate-800 bg-transparent border-none focus:outline-none cursor-pointer pr-1"
-                aria-label="Select Payroll Month"
-              >
-                {MONTH_NAMES.map((name, idx) => (
-                  <option key={idx} value={idx}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-
-              <span className="text-slate-300 font-light">|</span>
-
-              {/* Year Selector */}
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="text-xs font-bold text-slate-800 bg-transparent border-none focus:outline-none cursor-pointer pl-1"
-                aria-label="Select Payroll Year"
-              >
-                {[2024, 2025, 2026, 2027].map((yr) => (
-                  <option key={yr} value={yr}>
-                    {yr}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Quick Reset Button if not default */}
-            {(selectedCountry !== 'all' || selectedMonth !== 8 || selectedYear !== 2026) && (
-              <button
-                type="button"
-                onClick={() => {
-                  handleCountryChange('all');
-                  setSelectedMonth(8);
-                  setSelectedYear(2026);
-                }}
-                title="Reset filters to September 2026 (All)"
-                className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
+            {prevComp?.has_previous_data && (
+              <div className="text-xs text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-xl shadow-2xs">
+                <span>Compared with previous cycle: </span>
+                <strong className="text-slate-900">{prevComp.previous_start_date} to {prevComp.previous_end_date}</strong>
+              </div>
             )}
           </div>
-        </div>
-      </motion.div>
 
-      {/* 2. Top 4 Metric KPI Cards - Dynamically updated by filters (EXCEPT Global Workforce) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
-        {/* Card 1: Total Payroll (Changes based on Country + Month + Year) */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs relative transition hover:shadow-xs hover:border-slate-300"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-11 h-11 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-xs">
-              <Wallet className="w-5 h-5" />
+          {/* 4 Period-Controlled Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            {/* Metric 1: Salary Changes in Period */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+                <span>Salary Changes in Period</span>
+                <Clock className="w-4 h-4 text-blue-500" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-black text-slate-900 tracking-tight">
+                  {period.salary_changes_count.toLocaleString()}
+                </div>
+                <span className="text-xs text-slate-400 font-medium">modifications</span>
+              </div>
+              {prevComp?.has_previous_data ? (
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded flex items-center gap-0.5",
+                    (prevComp.salary_change_count_change_pct || 0) >= 0
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-rose-50 text-rose-700"
+                  )}>
+                    {(prevComp.salary_change_count_change_pct || 0) >= 0 ? '+' : ''}
+                    {prevComp.salary_change_count_change_pct}%
+                  </span>
+                  <span className="text-slate-500">vs prev {prevComp.previous_salary_change_count} changes</span>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 font-medium">
+                  {period.is_snapshot ? 'No adjustments in point snapshot' : 'No prior baseline data'}
+                </p>
+              )}
             </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-100 px-2 py-0.5 rounded-full">
-              {selectedCountry === 'IN' ? 'INR (₹)' : 'USD ($)'}
-            </span>
-          </div>
-          <p className="text-xs font-medium text-slate-500">
-            Total Payroll ({currentShortMonth} {selectedYear})
-          </p>
-          <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">
-            {selectedCountry === 'IN'
-              ? formatCurrency(calculatedPayrollIN_INR, 'INR')
-              : selectedCountry === 'US'
-                ? formatCurrency(calculatedPayrollUS, 'USD')
-                : formatCurrency(calculatedPayrollAll, 'USD')}
-          </h3>
-          <div className="flex items-center gap-1.5 mt-2.5 text-xs font-semibold text-emerald-600">
-            <TrendingUp className="w-3.5 h-3.5" />
-            <span>
-              {selectedCountry === 'IN'
-                ? `≈ ${formatCurrency(calculatedPayrollIN_USD, 'USD')} USD`
-                : selectedCountry === 'US'
-                  ? 'United States Entity'
-                  : 'Multi-entity consolidated'}
-            </span>
-          </div>
-        </motion.div>
 
-        {/* Card 2: Total Global Workforce */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs relative transition hover:shadow-xs hover:border-slate-300"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-11 h-11 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-xs">
-              <Users className="w-5 h-5" />
+            {/* Metric 2: Average Salary Adjustment */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+                <span>Avg Salary Adjustment</span>
+                <TrendingUp className="w-4 h-4 text-emerald-500" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-black text-slate-900 tracking-tight">
+                  {period.average_salary_adjustment_pct > 0 ? `+${period.average_salary_adjustment_pct}%` : `${period.average_salary_adjustment_pct}%`}
+                </div>
+                <span className="text-xs text-slate-400 font-medium">mean delta</span>
+              </div>
+              {prevComp?.has_previous_data ? (
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+                  <span className="text-slate-600">
+                    Prior cycle: {prevComp.previous_avg_adjustment_pct}%
+                  </span>
+                  <span className="text-slate-400">
+                    ({(prevComp.avg_adjustment_pct_difference || 0) >= 0 ? '+' : ''}{prevComp.avg_adjustment_pct_difference}% diff)
+                  </span>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 font-medium">
+                  {period.is_snapshot ? 'Calculated on review periods' : 'Historical average'}
+                </p>
+              )}
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              2 Global Hubs
-            </span>
-          </div>
-          <p className="text-xs font-medium text-slate-500">Total Global Workforce</p>
-          <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">
-            {stats ? (stats.total_active_employees || 10000).toLocaleString() : '10,000'}
-          </h3>
-          <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-semibold">
-            <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md text-[11px]">
-              🇺🇸 US: 69%
-            </span>
-            <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md text-[11px]">
-              🇮🇳 India: 31%
-            </span>
-          </div>
-        </motion.div>
 
-        {/* Card 3: Average Monthly Salary */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs relative transition hover:shadow-xs hover:border-slate-300"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-11 h-11 rounded-xl bg-indigo-500 text-white flex items-center justify-center shadow-xs">
-              <DollarSign className="w-5 h-5" />
+            {/* Metric 3: Total Annualized Compensation Increase */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+                <span>Total Annualized Increase</span>
+                <DollarSign className="w-4 h-4 text-purple-500" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-black text-slate-900 tracking-tight">
+                  +${(period.total_annualized_increase_usd / 1000000).toFixed(2)}M
+                </div>
+                <span className="text-xs text-slate-400 font-medium">annual USD</span>
+              </div>
+              {prevComp?.has_previous_data ? (
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded",
+                    (prevComp.total_increase_usd_change_pct || 0) >= 0
+                      ? "bg-purple-50 text-purple-700"
+                      : "bg-slate-100 text-slate-600"
+                  )}>
+                    {(prevComp.total_increase_usd_change_pct || 0) >= 0 ? '+' : ''}
+                    {prevComp.total_increase_usd_change_pct}%
+                  </span>
+                  <span className="text-slate-500">vs prev cycle</span>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Incremental budget impact
+                </p>
+              )}
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
-              Active Baseline
-            </span>
-          </div>
-          <p className="text-xs font-medium text-slate-500">Average Monthly Salary</p>
-          <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">
-            {selectedCountry === 'IN'
-              ? formatCurrency(Math.round(calculatedPayrollIN_INR / Math.max(1, (stats?.total_active_employees || 10000) * 0.31)), 'INR')
-              : selectedCountry === 'US'
-                ? formatCurrency(Math.round(calculatedPayrollUS / Math.max(1, (stats?.total_active_employees || 10000) * 0.69)), 'USD')
-                : formatCurrency(Math.round(calculatedPayrollAll / Math.max(1, (stats?.total_active_employees || 10000))), 'USD')}
-          </h3>
-          <div className="flex items-center gap-1.5 mt-2.5 text-xs font-semibold text-slate-500">
-            <Clock className="w-3.5 h-3.5 text-indigo-500" />
-            <span>Per employee across {countryLabel}</span>
-          </div>
-        </motion.div>
 
-        {/* Card 4: Employees Needing Review */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs relative transition hover:shadow-xs hover:border-slate-300"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-11 h-11 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
-              <UserCheck className="w-5 h-5" />
+            {/* Metric 4: Review Activity Breakdown */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase">
+                <span>Review Activity</span>
+                <FileCheck2 className="w-4 h-4 text-blue-600" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-black text-slate-900 tracking-tight">
+                  {period.review_activity.total_reviews}
+                </div>
+                <span className="text-xs text-slate-400 font-medium">total logged</span>
+              </div>
+              <div className="flex flex-wrap gap-1 text-[10px] font-bold">
+                <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
+                  Annual: {period.review_activity.annual_review_count}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                  Promo: {period.review_activity.promotion_count}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">
+                  Market: {period.review_activity.market_adjustment_count}
+                </span>
+              </div>
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-              Review Queue
-            </span>
           </div>
-          <p className="text-xs font-medium text-slate-500">Employees Needing Review</p>
-          <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">
-            {stats ? stats.pending_salaries_count.toLocaleString() : '142'} <span className="text-sm font-normal text-slate-500">Employees</span>
-          </h3>
-          <div className="flex items-center gap-1.5 mt-2.5 text-xs font-semibold text-slate-500">
-            <span>Eligible for periodic salary revision</span>
-          </div>
-        </motion.div>
-      </div>
 
-      {/* 3. Multi-Country Operations Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Country Hub 1: India */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-gradient-to-br from-white to-emerald-50/40 p-5 rounded-2xl border border-emerald-200/80 shadow-2xs hover:shadow-xs transition flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">🇮🇳</span>
-                <div>
-                  <h4 className="font-extrabold text-slate-900 text-base">India Operations</h4>
-                  <p className="text-xs text-slate-500 font-medium">Bengaluru Tech Hub &bull; Currency: INR (₹)</p>
+          {/* Period-Controlled Compensation Trend Chart */}
+          <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <span>Compensation Trend ({period.period_label})</span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+                    Controlled by Analysis Period
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Monthly payroll expenditure and salary adjustment volume across the selected timeframe
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs font-semibold text-slate-600">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-blue-600" />
+                  <span>Monthly Payroll ($M)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-emerald-500" />
+                  <span>Salary Adjustments Count</span>
                 </div>
               </div>
-              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                31% of Workforce
-              </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 my-4 text-xs">
-              <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Headcount</span>
-                <span className="text-base font-bold font-mono text-slate-900">
-                  {stats ? Math.round((stats.total_active_employees || 10000) * 0.31).toLocaleString() : '3,100'}
-                </span>
-              </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Est. Monthly Cost</span>
-                <span className="text-base font-bold font-mono text-emerald-700">
-                  {formatCurrency(calculatedPayrollIN_INR, 'INR')}
-                </span>
-              </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100 col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Pay Structure</span>
-                <span className="text-xs font-bold text-slate-800">
-                  Base + Allowances
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-3 border-t border-emerald-100/80 flex items-center justify-between">
-            <span className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Monthly Compensation Cycle Active
-            </span>
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-white border border-emerald-200 text-emerald-800 shadow-2xs">
-              EPFO Salary Tiers
-            </span>
-          </div>
-        </motion.div>
-
-        {/* Country Hub 2: United States */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-gradient-to-br from-white to-blue-50/40 p-5 rounded-2xl border border-blue-200/80 shadow-2xs hover:shadow-xs transition flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">🇺🇸</span>
-                <div>
-                  <h4 className="font-extrabold text-slate-900 text-base">United States Operations</h4>
-                  <p className="text-xs text-slate-500 font-medium">San Francisco Hub &bull; Currency: USD ($)</p>
-                </div>
-              </div>
-              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
-                69% of Workforce
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 my-4 text-xs">
-              <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Headcount</span>
-                <span className="text-base font-bold font-mono text-slate-900">
-                  {stats ? Math.round((stats.total_active_employees || 10000) * 0.69).toLocaleString() : '6,900'}
-                </span>
-              </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Est. Monthly Cost</span>
-                <span className="text-base font-bold font-mono text-blue-700">
-                  {formatCurrency(calculatedPayrollUS, 'USD')}
-                </span>
-              </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100 col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Pay Structure</span>
-                <span className="text-xs font-bold text-slate-800">
-                  Annual Base + Bonus
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-3 border-t border-blue-100/80 flex items-center justify-between">
-            <span className="text-[11px] text-blue-700 font-semibold flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Standard Compensation Cycle Active
-            </span>
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-white border border-blue-200 text-blue-800 shadow-2xs">
-              USD Leveling Bands
-            </span>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* 4. Middle Row: Payroll Trend (uses filters), Salary Breakdown Donut (changes with filter), Calendar (month/year based) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Trend Area Chart (5 Cols) - Uses Filtered Country, Month & Year */}
-        <motion.div
-          variants={itemVariants}
-          className="lg:col-span-5 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-            <div>
-              <h4 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
-                <span>Payroll Trend</span>
-              </h4>
-              <p className="text-[11px] text-slate-400">
-                {countryLabel} &bull; Ending {currentShortMonth} {selectedYear} ({activeTrendCurrency})
-              </p>
-            </div>
-
-            {/* Range Toggle */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
-              <button
-                type="button"
-                onClick={() => setTrendPeriod('6m')}
-                className={cn(
-                  "px-2.5 py-1 rounded-md text-xs font-bold transition",
-                  trendPeriod === '6m' ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                Last 6M
-              </button>
-              <button
-                type="button"
-                onClick={() => setTrendPeriod('12m')}
-                className={cn(
-                  "px-2.5 py-1 rounded-md text-xs font-bold transition",
-                  trendPeriod === '12m' ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                Last 12M
-              </button>
-            </div>
-          </div>
-
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dynamicTrendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="payrollGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis
-                  stroke="#94a3b8"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(val) => {
-                    if (selectedCountry === 'IN') {
-                      return `₹${(val / 10000000).toFixed(0)}Cr`;
-                    }
-                    if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
-                    return `$${Math.round(val / 1000)}K`;
-                  }}
-                />
-                <Tooltip
-                  formatter={(val: any) => [
-                    formatCurrency(Number(val), activeTrendCurrency),
-                    `${countryLabel} Payroll`
-                  ]}
-                  contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey={selectedCountry === 'IN' ? 'local_amount' : 'amount'}
-                  stroke="#2563eb"
-                  strokeWidth={2.5}
-                  fillOpacity={1}
-                  fill="url(#payrollGradient)"
-                  dot={{ r: 3.5, fill: '#2563eb', strokeWidth: 1.5, stroke: '#fff' }}
-                  activeDot={{ r: 5, fill: '#1d4ed8' }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </motion.div>
-
-        {/* Donut Salary Breakdown (4 Cols) - Changes with filter */}
-        <motion.div
-          variants={itemVariants}
-          className="lg:col-span-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <h4 className="font-bold text-slate-900 text-sm">Compensation Composition</h4>
-              <p className="text-[11px] text-slate-400">{countryLabel} &bull; {currentShortMonth} {selectedYear}</p>
-            </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-              {breakdownCurrency}
-            </span>
-          </div>
-
-          <div className="relative flex items-center justify-center my-2">
-            <div className="w-44 h-44">
+            <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={dynamicBreakdownData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={52}
-                    outerRadius={76}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {dynamicBreakdownData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={BREAKDOWN_COLORS[index % BREAKDOWN_COLORS.length]} />
-                    ))}
-                  </Pie>
-                </PieChart>
+                <AreaChart
+                  data={period.trend_points.map((pt) => ({
+                    label: pt.date_label,
+                    payroll_m: Number((pt.payroll_usd / 1000000).toFixed(2)),
+                    adjustments: pt.salary_adjustments_count,
+                    increase_k: Math.round(pt.total_increase_usd / 1000),
+                    avg_pct: pt.avg_adjustment_pct
+                  }))}
+                  margin={{ top: 10, right: 10, left: -10, bottom: 10 }}
+                >
+                  <defs>
+                    <linearGradient id="payrollGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                  <YAxis
+                    stroke="#94a3b8"
+                    fontSize={11}
+                    tickLine={false}
+                    tickFormatter={(val) => `$${val}M`}
+                  />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xl text-xs space-y-1.5">
+                            <div className="font-bold text-slate-900 border-b border-slate-100 pb-1">
+                              {label}
+                            </div>
+                            <div className="flex justify-between gap-4">
+                              <span className="text-slate-500">Monthly Payroll:</span>
+                              <span className="font-bold text-blue-700">${data.payroll_m}M USD</span>
+                            </div>
+                            <div className="flex justify-between gap-4">
+                              <span className="text-slate-500">Salary Adjustments:</span>
+                              <span className="font-bold text-emerald-600">{data.adjustments} logged</span>
+                            </div>
+                            {data.increase_k > 0 && (
+                              <div className="flex justify-between gap-4">
+                                <span className="text-slate-500">Period Increase:</span>
+                                <span className="font-semibold text-slate-800">+${data.increase_k}k USD</span>
+                              </div>
+                            )}
+                            {data.avg_pct > 0 && (
+                              <div className="flex justify-between gap-4">
+                                <span className="text-slate-500">Avg Adjustment:</span>
+                                <span className="font-semibold text-slate-800">+{data.avg_pct}%</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="payroll_m"
+                    stroke="#2563eb"
+                    strokeWidth={2.5}
+                    fillOpacity={1}
+                    fill="url(#payrollGradient)"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="adjustments"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    dot={{ r: 4, fill: '#10b981' }}
+                  />
+                </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="absolute flex flex-col items-center justify-center text-center px-2">
-              <span className="text-[10px] font-medium text-slate-400">Total Base</span>
-              <span className="text-xs font-extrabold text-slate-900 truncate max-w-[100px]">
-                {breakdownTotalFormatted}
-              </span>
-            </div>
           </div>
+        </div>
+      )}
 
-          <div className="space-y-1.5 text-xs pt-1 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                <span>Base Salary (75%)</span>
+      {/* 4. CURRENT-STATE DISTRIBUTION & BREAKDOWNS (Labeled As of [date]) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Department Compensation Breakdown (7 cols) - As of [date] */}
+        <div className="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Current Department Compensation Breakdown
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Total annual compensation expenditure and headcount &bull;{' '}
+                  <span className="font-semibold text-slate-700">As of {formattedAsOf}</span>
+                </p>
               </div>
-              <span className="font-semibold text-slate-800">
-                {formatCurrency(breakdownNet, breakdownCurrency)}
+              <span className="text-xs font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded-lg">
+                USD Canonical
               </span>
             </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-                <span>Allowances & Benefits (15%)</span>
-              </div>
-              <span className="font-semibold text-slate-800">
-                {formatCurrency(breakdownDeductions, breakdownCurrency)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <span>Bonus Target & Merit (10%)</span>
-              </div>
-              <span className="font-semibold text-slate-800">
-                {formatCurrency(Math.round(breakdownNet * 0.12), breakdownCurrency)}
-              </span>
-            </div>
-          </div>
-        </motion.div>
 
-        {/* Payroll Calendar (3 Cols) - Based strictly on Month & Year selection */}
-        <motion.div
-          variants={itemVariants}
-          className="lg:col-span-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="font-bold text-slate-900 text-sm">Payroll Calendar</h4>
-            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-              {currentShortMonth} {selectedYear}
-            </span>
-          </div>
-
-          <div className="space-y-2">
-            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-400">
-              <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
-            </div>
-            <div className="grid grid-cols-7 gap-1 text-center text-xs">
-              {calendarCells.map((item, idx) => (
-                <div
-                  key={idx}
-                  className={cn(
-                    "h-7 flex items-center justify-center rounded-lg font-medium transition",
-                    item.isPrev || item.isNext ? "text-slate-300" : "text-slate-700",
-                    item.isPayday && "bg-blue-600 text-white font-bold shadow-xs",
-                    item.isUpcoming && "bg-emerald-50 text-emerald-700 font-bold border border-emerald-200"
-                  )}
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={dashboardData?.department_breakdown.map((d) => ({
+                    name: d.department_name,
+                    total_m: Number((d.total_comp_usd / 1000000).toFixed(2)),
+                    avg_k: Math.round(d.avg_salary_usd / 1000),
+                    count: d.employee_count
+                  })) || []}
+                  margin={{ top: 10, right: 10, left: -10, bottom: 20 }}
                 >
-                  {item.day}
+                  <XAxis
+                    dataKey="name"
+                    stroke="#94a3b8"
+                    fontSize={11}
+                    tickLine={false}
+                    interval={0}
+                    angle={-15}
+                    textAnchor="end"
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    fontSize={11}
+                    tickLine={false}
+                    tickFormatter={(val) => `$${val}M`}
+                  />
+                  <Tooltip
+                    formatter={(val: any, name?: any) => [
+                      String(name) === 'total_m' ? `$${val}M USD` : `$${val}k USD`,
+                      String(name) === 'total_m' ? 'Total Compensation' : 'Average Salary'
+                    ]}
+                    contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}
+                  />
+                  <Bar dataKey="total_m" radius={[6, 6, 0, 0]}>
+                    {dashboardData?.department_breakdown.map((_, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+            {dashboardData?.department_breakdown.slice(0, 6).map((dept) => (
+              <div
+                key={dept.department_id}
+                onClick={() => onNavigateToEmployees(selectedCountry, String(dept.department_id))}
+                className="p-2.5 rounded-xl bg-slate-50 hover:bg-blue-50/60 cursor-pointer transition border border-slate-100 flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                  <span className="truncate">{dept.department_name}</span>
+                  <span className="text-blue-600 font-extrabold">{dept.comp_share_pct}%</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>{dept.employee_count.toLocaleString()} staff</span>
+                  <span className="font-semibold text-slate-700">${(dept.total_comp_usd / 1000000).toFixed(1)}M</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Current Country Compensation Breakdown (5 cols) - As of [date] */}
+        <div className="lg:col-span-5 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Current Country Breakdown
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Headcount distribution & wage share &bull;{' '}
+                  <span className="font-semibold text-slate-700">As of {formattedAsOf}</span>
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg">
+                2 Key Hubs
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {dashboardData?.countries_breakdown.map((c) => {
+                const isIndia = c.country_code === 'IN';
+                return (
+                  <div
+                    key={c.country_code}
+                    className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{isIndia ? '🇮🇳' : '🇺🇸'}</span>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900">{c.country_name}</div>
+                          <div className="text-[10px] text-slate-500">
+                            {c.employee_count.toLocaleString()} employees ({c.pct_workforce}% workforce)
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs font-bold text-slate-900 font-mono">
+                          ${(c.total_comp_usd / 1000000).toFixed(1)}M USD
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          Avg: ${c.avg_salary_usd.toLocaleString()} / yr
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all duration-500",
+                          isIndia ? "bg-amber-500" : "bg-blue-600"
+                        )}
+                        style={{ width: `${c.pct_workforce}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-100 p-2.5 rounded-xl bg-blue-50/60 border border-blue-100 flex items-center justify-between text-xs text-blue-900">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>India accounts for 69% of headcount; US accounts for 31%.</span>
+            </div>
+            <span className="font-bold text-[11px]">As of {formattedAsOf}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. SALARY DISTRIBUTION & PERIOD-CONTROLLED RECENT SALARY CHANGES */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Current Salary Distribution Across Bands (5 cols) - As of [date] */}
+        <div className="lg:col-span-5 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Current Salary Band Distribution
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Employee count across bands &bull;{' '}
+                  <span className="font-semibold text-slate-700">As of {formattedAsOf}</span>
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-purple-100 text-purple-700 rounded-lg">
+                5 Standard Bands
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {dashboardData?.salary_band_distribution.map((band) => (
+                <div key={band.band_name} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-slate-800 font-bold">{band.band_name}</span>
+                    <span className="text-slate-500">
+                      {band.employee_count.toLocaleString()} ({band.pct_workforce}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                      style={{ width: `${Math.min(100, band.pct_workforce * 2.2)}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400">
+                    <span>Range: ${band.min_salary_usd.toLocaleString()} - ${band.max_salary_usd.toLocaleString()}</span>
+                    <span>Avg: ${band.avg_salary_usd.toLocaleString()} USD</span>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-around text-xs text-slate-500">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
-              <span>Mid-month (15th)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              <span>Close ({daysInSelectedMonth}th)</span>
-            </div>
+          <div className="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+            <span>Canonical Scale: L1 Associate → L5 Principal</span>
+            <span className="font-semibold text-slate-700">As of {formattedAsOf}</span>
           </div>
-        </motion.div>
-      </div>
+        </div>
 
-      {/* 5. Bottom Row: Employee Payroll Table (Filters has Country & Month only; Whole 30 days used, breadcrumb removed) */}
-      <motion.div
-        variants={itemVariants}
-        className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col"
-      >
-        {/* Table Header Controls */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+        {/* Period-Controlled Recent Salary Changes (7 cols) */}
+        <div className="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div>
-            <div className="flex items-center gap-2">
-              <h4 className="font-bold text-slate-900 text-base">Salary Review Register</h4>
-              {isPageLoading && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-semibold animate-pulse">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-                  Updating...
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate-400">
-              Active employee base compensation records and scheduled adjustments
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Filters Button (Toggles Country & Month only, does NOT take to Reports) */}
-            <button
-              type="button"
-              onClick={() => setIsTableFilterOpen(prev => !prev)}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition min-h-[38px] cursor-pointer",
-                isTableFilterOpen
-                  ? "bg-blue-50 border-blue-300 text-blue-700"
-                  : "border-slate-200 hover:bg-slate-50 text-slate-700"
-              )}
-            >
-              <Filter className="w-3.5 h-3.5" />
-              <span>Filters</span>
-              {(selectedCountry !== 'all' || selectedMonth !== 8) && (
-                <span className="w-2 h-2 rounded-full bg-blue-600" />
-              )}
-            </button>
-
-            {/* CSV Export */}
-            <button
-              type="button"
-              onClick={() => {
-                const csvContent = "data:text/csv;charset=utf-8,"
-                  + "Code,FirstName,LastName,Role,Department,Salary,Currency\n"
-                  + displayEmployees.map(e => `${e.employee_code},"${e.first_name}","${e.last_name}","${e.role_title}","${e.department_name}",${e.current_salary},${e.currency_code}`).join("\n");
-                const encodedUri = encodeURI(csvContent);
-                const link = document.createElement("a");
-                link.setAttribute("href", encodedUri);
-                link.setAttribute("download", `salary_register_${tableShortMonth}_${tableYear}.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 transition min-h-[38px]"
-            >
-              <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>Export</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onViewEmployees || onRunPayroll}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition min-h-[38px]"
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>Manage Salaries</span>
-            </button>
-          </div>
-        </div>
-
-        {/* In-Table Filter Toolbar (COUNTRIES AND MONTH ONLY) */}
-        {isTableFilterOpen && (
-          <div className="p-3 sm:px-5 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs animate-fadeIn">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Table Filters:</span>
-
-              {/* Country Selection */}
-              <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 shadow-2xs">
-                <span className="text-[11px] font-semibold text-slate-400 pl-1.5 pr-0.5">Country:</span>
-                <button
-                  type="button"
-                  onClick={() => handleTableCountryChange('all')}
-                  className={cn(
-                    "px-2.5 py-1 rounded text-xs font-bold transition",
-                    tableCountry === 'all' ? "bg-blue-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                  )}
-                >
-                  All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleTableCountryChange('US')}
-                  className={cn(
-                    "px-2.5 py-1 rounded text-xs font-bold transition flex items-center gap-1",
-                    tableCountry === 'US' ? "bg-blue-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                  )}
-                >
-                  <span>🇺🇸</span> US
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleTableCountryChange('IN')}
-                  className={cn(
-                    "px-2.5 py-1 rounded text-xs font-bold transition flex items-center gap-1",
-                    tableCountry === 'IN' ? "bg-blue-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                  )}
-                >
-                  <span>🇮🇳</span> India
-                </button>
-              </div>
-
-              {/* Month Selection */}
-              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
-                <span className="text-[11px] font-semibold text-slate-400">Month:</span>
-                <select
-                  value={tableMonth}
-                  onChange={(e) => setTableMonth(Number(e.target.value))}
-                  className="text-xs font-bold text-slate-800 bg-transparent border-none focus:outline-none cursor-pointer"
-                >
-                  {MONTH_NAMES.map((name, idx) => (
-                    <option key={idx} value={idx}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Year Selection */}
-              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
-                <span className="text-[11px] font-semibold text-slate-400">Year:</span>
-                <select
-                  value={tableYear}
-                  onChange={(e) => setTableYear(Number(e.target.value))}
-                  className="text-xs font-bold text-slate-800 bg-transparent border-none focus:outline-none cursor-pointer"
-                >
-                  {[2024, 2025, 2026, 2027].map((yr) => (
-                    <option key={yr} value={yr}>
-                      {yr}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsTableFilterOpen(false)}
-              className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Dismiss</span>
-            </button>
-          </div>
-        )}
-
-        {/* Mobile Payroll Card List (< md) */}
-        <div className="block md:hidden divide-y divide-slate-100">
-          {displayEmployees.slice(0, 5).map((emp, idx) => {
-            const gross = emp.current_salary ? Math.round(emp.current_salary / 12) : 7500;
-            const deductions = Math.round(gross * 0.12);
-            const bonus = idx === 0 ? 500 : idx === 1 ? 300 : idx === 2 ? 250 : 200;
-            const net = gross - deductions + bonus;
-            const payDate = idx % 2 === 0
-              ? `${currentShortMonth} 15, ${selectedYear}`
-              : `${currentShortMonth} ${daysInSelectedMonth}, ${selectedYear}`;
-
-            return (
-              <div
-                key={emp.id}
-                onClick={() => onSelectEmployee(emp)}
-                className="p-4 hover:bg-slate-50 cursor-pointer transition space-y-2.5"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-200">
-                      {getInitials(emp.first_name, emp.last_name)}
-                    </div>
-                    <div>
-                      <p className="font-extrabold text-slate-900 text-sm leading-tight">
-                        {emp.first_name} {emp.last_name}
-                      </p>
-                      <p className="text-[11px] text-slate-500">{emp.role_title} · <span className="text-slate-400">{emp.department_name}</span></p>
-                    </div>
-                  </div>
-                  {getStatusBadge(emp.employment_status, idx)}
-                </div>
-
-                {/* Days Worked: 30 / 30 Days (Breadcrumbs removed) */}
-                <div className="p-2.5 bg-slate-50 rounded-xl flex items-center justify-between text-xs">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Days Worked / Total</span>
-                  <span className="font-extrabold text-slate-800">30 / 30 Days</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl text-xs">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Gross / Month</span>
-                    <span className="font-bold text-slate-700">{formatCurrency(gross, emp.currency_code)}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Net Pay</span>
-                    <span className="font-extrabold text-slate-900">{formatCurrency(net, emp.currency_code)}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-                  <span>Pay date: <b className="text-slate-600">{payDate}</b></span>
-                  <span className="text-blue-600 font-semibold flex items-center gap-0.5">
-                    View details <ChevronRight className="w-3 h-3" />
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <span>Recent Salary Changes</span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+                    {period?.period_label}
                   </span>
-                </div>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {period?.is_snapshot
+                    ? 'Recent logged compensation modifications across active employees'
+                    : `Salary adjustments executed during ${period?.period_label} (${period?.start_date} to ${period?.end_date})`}
+                </p>
               </div>
-            );
-          })}
-        </div>
-
-        {/* Desktop Table Content (>= md) */}
-        <div className="hidden md:block overflow-x-auto min-h-[360px] relative">
-          {isPageLoading && (
-            <div className="absolute inset-0 bg-white/70 backdrop-blur-2xs z-20 flex items-center justify-center transition-all duration-200">
-              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white shadow-lg border border-slate-200 text-xs font-bold text-slate-800">
-                <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                <span>Loading payroll records...</span>
-              </div>
+              <button
+                onClick={() => onNavigateToEmployees()}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+              >
+                <span>View All In Directory</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-          )}
 
-          <table className="w-full text-left text-xs table-fixed">
-            <thead className="bg-slate-50 text-slate-500 font-semibold uppercase text-[11px] border-b border-slate-200">
-              <tr>
-                <th className="py-3 px-3 w-14 text-center">Avatar</th>
-                <th className="py-3 px-4 w-44">Employee Name</th>
-                <th className="py-3 px-4 w-44">Role</th>
-                <th className="py-3 px-3 w-32">Department</th>
-                <th className="py-3 px-4 w-44">Days Worked / Total</th>
-                <th className="py-3 px-3 w-28">Gross Salary</th>
-                <th className="py-3 px-3 w-24">Deductions</th>
-                <th className="py-3 px-3 w-28">Net Pay</th>
-                <th className="py-3 px-3 w-28">Status</th>
-                <th className="py-3 px-3 w-28">Pay Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {displayEmployees.slice(0, 5).map((emp, idx) => {
-                const gross = emp.current_salary ? Math.round(emp.current_salary / 12) : 7500;
-                const deductions = Math.round(gross * 0.12);
-                const bonus = idx === 0 ? 500 : idx === 1 ? 300 : idx === 2 ? 250 : 200;
-                const net = gross - deductions + bonus;
-                const payDate = idx % 2 === 0
-                  ? `${tableShortMonth} 15, ${tableYear}`
-                  : `${tableShortMonth} ${tableDaysInMonth}, ${tableYear}`;
-
-                return (
-                  <tr
-                    key={emp.id}
-                    onClick={() => onSelectEmployee(emp)}
-                    className="hover:bg-blue-50/40 cursor-pointer transition h-[64px]"
-                  >
-                    {/* Avatar */}
-                    <td className="py-3 px-3 text-center">
-                      <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs mx-auto border border-blue-200/80 shadow-2xs">
-                        {getInitials(emp.first_name, emp.last_name)}
-                      </div>
-                    </td>
-
-                    {/* Separated Employee Name */}
-                    <td className="py-3 px-4 font-extrabold text-slate-900">
-                      <p className="leading-tight text-slate-900">{emp.first_name} {emp.last_name}</p>
-                      <span className="text-[10px] font-semibold text-slate-400 font-mono">
-                        {emp.employee_code}
-                      </span>
-                    </td>
-
-                    {/* Role Title */}
-                    <td className="py-3 px-4 font-medium text-slate-700 truncate">
-                      {emp.role_title}
-                    </td>
-
-                    {/* Department */}
-                    <td className="py-3 px-3 font-medium text-slate-600 truncate">
-                      {emp.department_name || 'Engineering'}
-                    </td>
-
-                    {/* Whole 30 days used, breadcrumbs removed */}
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-1.5 font-extrabold text-slate-800">
-                        <CalendarDays className="w-3.5 h-3.5 text-blue-600" />
-                        <span>30 / 30 Days</span>
-                      </div>
-                    </td>
-
-                    {/* Financial Figures */}
-                    <td className="py-3 px-3 font-semibold text-slate-800">
-                      {formatCurrency(gross, emp.currency_code)}
-                    </td>
-                    <td className="py-3 px-3 text-slate-500">
-                      {formatCurrency(deductions, emp.currency_code)}
-                    </td>
-                    <td className="py-3 px-3 font-extrabold text-slate-900">
-                      {formatCurrency(net, emp.currency_code)}
-                    </td>
-
-                    {/* Status & Pay Date */}
-                    <td className="py-3 px-3">
-                      {getStatusBadge(emp.employment_status, idx)}
-                    </td>
-                    <td className="py-3 px-3 text-slate-500 font-medium text-[11px]">
-                      {payDate}
-                    </td>
+            {/* Desktop Table View */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider text-[10px] font-bold">
+                    <th className="pb-2">Employee</th>
+                    <th className="pb-2">Adjustment</th>
+                    <th className="pb-2">New Base</th>
+                    <th className="pb-2">Reason</th>
+                    <th className="pb-2">Effective</th>
+                    <th className="pb-2 text-right">Action</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {dashboardData?.recent_changes && dashboardData.recent_changes.length > 0 ? (
+                    dashboardData.recent_changes.slice(0, 7).map((change) => {
+                      const isPositive = change.percentage_change >= 0;
+                      return (
+                        <tr key={change.id} className="hover:bg-slate-50/80 transition">
+                          <td className="py-2.5">
+                            <div className="font-bold text-slate-900">{change.employee_name}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {change.employee_code} &bull; {change.role_title}
+                            </div>
+                          </td>
+                          <td className="py-2.5">
+                            <span
+                              className={cn(
+                                "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold",
+                                isPositive ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                              )}
+                            >
+                              {isPositive ? '+' : ''}{change.percentage_change}%
+                            </span>
+                          </td>
+                          <td className="py-2.5 font-bold font-mono text-slate-800">
+                            {change.currency_code} {change.new_salary.toLocaleString()}
+                          </td>
+                          <td className="py-2.5">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700">
+                              {change.reason}
+                            </span>
+                          </td>
+                          <td className="py-2.5 text-slate-500 text-[11px]">
+                            {change.effective_date}
+                          </td>
+                          <td className="py-2.5 text-right">
+                            {onOpenEditSalary && (
+                              <button
+                                onClick={() => onOpenEditSalary(change.employee_id)}
+                                className="text-blue-600 hover:text-blue-800 font-bold text-[11px]"
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-400">
+                        No salary changes recorded in this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-        {/* Table Pagination Controls */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 bg-slate-50/40">
-          <p>
-            Showing {((dashboardPage - 1) * 10) + 1} to {Math.min(dashboardPage * 10, totalEmployeesCount)} of {totalEmployeesCount.toLocaleString()} employees
-          </p>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              disabled={dashboardPage <= 1 || isPageLoading}
-              onClick={() => handlePageChange(dashboardPage - 1)}
-              className="px-3 py-2 rounded-xl border border-slate-200 flex items-center justify-center hover:bg-slate-50 disabled:opacity-40 min-h-[38px] min-w-[38px] font-bold transition cursor-pointer"
-              aria-label="Previous page"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => handlePageChange(1)}
-              className={cn(
-                "w-9 h-9 rounded-xl font-bold flex items-center justify-center min-h-[38px] min-w-[38px] transition cursor-pointer",
-                dashboardPage === 1 ? "bg-blue-600 text-white shadow-xs" : "border border-slate-200 hover:bg-slate-50"
+            {/* Mobile Card View (<sm) */}
+            <div className="sm:hidden space-y-3">
+              {dashboardData?.recent_changes && dashboardData.recent_changes.length > 0 ? (
+                dashboardData.recent_changes.slice(0, 5).map((change) => {
+                  const isPositive = change.percentage_change >= 0;
+                  return (
+                    <div key={change.id} className="p-3 bg-slate-50/70 border border-slate-200/80 rounded-xl space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-900 text-xs">{change.employee_name}</div>
+                          <div className="text-[10px] text-slate-400">{change.role_title} &bull; {change.department_name}</div>
+                        </div>
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold shrink-0",
+                            isPositive ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                          )}
+                        >
+                          {isPositive ? '+' : ''}{change.percentage_change}%
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-xs">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block uppercase">New Salary</span>
+                          <span className="font-bold font-mono text-slate-900">
+                            {change.currency_code} {change.new_salary.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white border border-slate-200 text-slate-600">
+                            {change.reason}
+                          </span>
+                          {onOpenEditSalary && (
+                            <button
+                              onClick={() => onOpenEditSalary(change.employee_id)}
+                              className="text-xs font-bold text-blue-600 px-2 py-1 bg-white border border-slate-200 rounded-lg"
+                            >
+                              Edit
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="py-6 text-center text-xs text-slate-400">
+                  No salary changes recorded in this period.
+                </div>
               )}
-            >
-              1
-            </button>
-            {totalPages > 1 && (
-              <button
-                type="button"
-                onClick={() => handlePageChange(2)}
-                className={cn(
-                  "w-9 h-9 rounded-xl font-bold flex items-center justify-center min-h-[38px] min-w-[38px] transition cursor-pointer",
-                  dashboardPage === 2 ? "bg-blue-600 text-white shadow-xs" : "border border-slate-200 hover:bg-slate-50"
-                )}
-              >
-                2
-              </button>
-            )}
-            {totalPages > 3 && <span className="px-1 text-slate-400">...</span>}
-            {totalPages > 2 && (
-              <button
-                type="button"
-                onClick={() => handlePageChange(totalPages)}
-                className={cn(
-                  "w-9 h-9 rounded-xl font-bold flex items-center justify-center min-h-[38px] min-w-[38px] transition cursor-pointer",
-                  dashboardPage === totalPages ? "bg-blue-600 text-white shadow-xs" : "border border-slate-200 hover:bg-slate-50"
-                )}
-              >
-                {totalPages}
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={dashboardPage >= totalPages || isPageLoading}
-              onClick={() => handlePageChange(dashboardPage + 1)}
-              className="px-3 py-2 rounded-xl border border-slate-200 flex items-center justify-center hover:bg-slate-50 disabled:opacity-40 min-h-[38px] min-w-[38px] font-bold transition cursor-pointer"
-              aria-label="Next page"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+            <span>Period filter: {period?.period_label}</span>
+            <span className="text-slate-600 font-medium">
+              {dashboardData?.recent_changes.length || 0} updates listed
+            </span>
           </div>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };

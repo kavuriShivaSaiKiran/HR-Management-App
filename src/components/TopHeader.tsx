@@ -1,15 +1,17 @@
 import React from 'react';
 import {
-  Search,
   Bell,
   Menu,
-  ChevronDown
+  ChevronDown,
+  LayoutDashboard,
+  Users,
+  BarChart3,
+  Settings
 } from 'lucide-react';
 import { DateRangeFilter } from '../types';
+import { TabType } from './Sidebar';
 
 interface TopHeaderProps {
-  onSearchChange: (query: string) => void;
-  searchQuery: string;
   onOpenAddModal: () => void;
   onReseed?: () => void;
   employeeCount?: number;
@@ -22,11 +24,35 @@ interface TopHeaderProps {
   userRole?: 'hr.global' | 'hr.india' | 'employee';
   onOpenLoginModal?: () => void;
   onSwitchRole?: (role: 'hr.global' | 'hr.india' | 'employee') => void;
+  isSidebarCollapsed?: boolean;
+  onToggleSidebarCollapse?: () => void;
+  activeTab?: TabType;
 }
 
+const TAB_TITLES: Record<TabType, { title: string; subtitle: string; icon: React.ComponentType<{ className?: string }> }> = {
+  dashboard: {
+    title: 'Compensation Dashboard',
+    subtitle: 'Global headcount and wage metrics',
+    icon: LayoutDashboard
+  },
+  employees: {
+    title: 'Employee Directory',
+    subtitle: 'Base salaries and band alignments',
+    icon: Users
+  },
+  insights: {
+    title: 'Compensation Insights',
+    subtitle: 'Analytical distributions and parity',
+    icon: BarChart3
+  },
+  settings: {
+    title: 'Compensation Policies',
+    subtitle: 'Multi-entity merit rules & guardrails',
+    icon: Settings
+  }
+};
+
 export const TopHeader: React.FC<TopHeaderProps> = ({
-  onSearchChange,
-  searchQuery,
   onOpenAddModal,
   onReseed,
   employeeCount,
@@ -38,50 +64,39 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   unreadNotificationsCount,
   userRole = 'hr.global',
   onOpenLoginModal,
-  onSwitchRole
+  onSwitchRole,
+  isSidebarCollapsed = false,
+  onToggleSidebarCollapse,
+  activeTab = 'dashboard'
 }) => {
+  const currentTabInfo = TAB_TITLES[activeTab] || TAB_TITLES.dashboard;
+  const TabIcon = currentTabInfo.icon;
+
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 gap-2">
-      {/* Left Area: Mobile Menu Trigger + Brand (mobile) + Search Bar */}
-      <div className="flex items-center gap-2 sm:gap-3 flex-1 max-w-xl min-w-0">
+    <header className="h-14 sm:h-16 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 gap-2 select-none">
+      {/* Left Area: Mobile Menu Toggle + Current View Title */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {/* Mobile menu trigger */}
         <button
           onClick={onToggleMobileMenu}
-          className="lg:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition flex items-center justify-center min-h-[44px] min-w-[44px] shrink-0"
+          className="lg:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition flex items-center justify-center min-h-[44px] min-w-[44px] shrink-0 active:scale-95 cursor-pointer"
           aria-label="Open navigation menu"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Brand icon on mobile screens */}
-        <div className="flex lg:hidden items-center gap-1.5 shrink-0 pr-1">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-xs">
-            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2.5">
-              <circle cx="12" cy="12" r="9" strokeOpacity="0.4" />
-              <path d="M12 3a9 9 0 0 1 9 9c0 4.97-4.03 9-9 9" strokeLinecap="round" />
-              <path d="M12 7a5 5 0 0 1 5 5" strokeLinecap="round" />
-            </svg>
+        {/* Current View Title (clean, no duplicate brand badge) */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 border border-slate-200/80">
+            <TabIcon className="w-4 h-4 text-blue-600" />
           </div>
-          <span className="text-sm font-extrabold tracking-tight text-slate-900 hidden xs:inline">PaySphere</span>
-        </div>
-
-        {/* Search input */}
-        <div className="relative w-full min-w-0">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search employees, roles, IDs..."
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-9 pr-3 md:pr-12 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition min-h-[40px]"
-          />
-          <div className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 items-center gap-0.5 pointer-events-none">
-            <kbd className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 bg-white border border-slate-200 rounded shadow-2xs">
-              ⌘
-            </kbd>
-            <kbd className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 bg-white border border-slate-200 rounded shadow-2xs">
-              K
-            </kbd>
+          <div className="min-w-0">
+            <h1 className="text-sm sm:text-base font-extrabold tracking-tight text-slate-900 truncate">
+              {currentTabInfo.title}
+            </h1>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate hidden xs:block">
+              {currentTabInfo.subtitle}
+            </p>
           </div>
         </div>
       </div>
@@ -91,23 +106,23 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         {/* Notifications Button */}
         <button
           onClick={onOpenNotifications}
-          className="relative w-10 h-10 rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center justify-center text-slate-600 transition shrink-0 bg-white"
+          className="relative min-h-[44px] min-w-[44px] rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center justify-center text-slate-600 transition shrink-0 bg-white shadow-2xs active:scale-95 cursor-pointer"
           aria-label="Open notifications"
           title="Open notifications"
         >
           <Bell className="w-4 h-4" />
           {unreadNotificationsCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center border-2 border-white animate-pulse">
+            <span className="absolute top-2 right-2 w-4 h-4 bg-rose-500 text-white rounded-full text-[10px] font-extrabold flex items-center justify-center border-2 border-white animate-pulse">
               {unreadNotificationsCount}
             </span>
           )}
         </button>
 
-        {/* Demo Persona Switcher Pill & Button */}
-        <div className="flex items-center gap-2 pl-1 sm:pl-2 border-l border-slate-200 shrink-0">
+        {/* Demo Persona Switcher */}
+        <div className="flex items-center pl-1 border-l border-slate-200/80 shrink-0">
           <button
             onClick={onOpenLoginModal}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 hover:border-blue-300 bg-slate-50 hover:bg-blue-50/50 transition text-left"
+            className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-xl border border-slate-200 hover:border-blue-300 bg-slate-50 hover:bg-blue-50/50 transition text-left min-h-[44px] active:scale-95 cursor-pointer"
             title="Switch Demo Persona (Global HR / India HR / Employee)"
           >
             <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs shrink-0">
@@ -121,7 +136,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </div>
               <p className="text-[10px] text-blue-600 font-semibold leading-tight">
-                {userRole === 'hr.global' ? 'US & India' : userRole === 'hr.india' ? 'India Only' : 'Employee Portal'}
+                {userRole === 'hr.global' ? 'US & India' : userRole === 'hr.india' ? 'India Only' : 'Employee View'}
               </p>
             </div>
           </button>
