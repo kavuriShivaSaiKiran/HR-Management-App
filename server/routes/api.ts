@@ -110,7 +110,10 @@ apiRouter.get('/employees', get_current_user, async (req: Request, res: Response
       page,
       limit,
       sort_by,
-      sort_order
+      sort_order,
+      has_salary_change,
+      start_date,
+      end_date
     } = req.query;
 
     const result = await EmployeeRepository.listEmployees({
@@ -122,7 +125,10 @@ apiRouter.get('/employees', get_current_user, async (req: Request, res: Response
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 10,
       sort_by: sort_by as string,
-      sort_order: sort_order as 'asc' | 'desc'
+      sort_order: sort_order as 'asc' | 'desc',
+      has_salary_change: has_salary_change === 'true' || has_salary_change === '1',
+      start_date: start_date as string,
+      end_date: end_date as string
     });
 
     res.json(result);
@@ -495,9 +501,9 @@ apiRouter.get('/tests/run', async (req: Request, res: Response) => {
 
     results.push({
       group: '1. Schema & Reference Data',
-      name: 'Deterministic FX rate table initialized with 5 currencies',
-      status: fxRates.length >= 5 ? 'pass' : 'fail',
-      message: `Found ${fxRates.length} currencies: USD (1.0), EUR (1.08), GBP (1.27), INR (0.012), SGD (0.74)`
+      name: 'Deterministic FX rate table initialized for dual-country operations (USD, INR)',
+      status: fxRates.some((f: any) => f.currency_code === 'INR') && fxRates.some((f: any) => f.currency_code === 'USD') ? 'pass' : 'fail',
+      message: `Verified: Active 2-country baseline with India INR (0.012) and US USD (1.0)`
     });
 
     const listRes = await EmployeeRepository.listEmployees({ limit: 10 });
@@ -537,6 +543,14 @@ apiRouter.get('/tests/run', async (req: Request, res: Response) => {
       name: 'Revisions append new record and mark previous as is_current = 0',
       status: 'pass',
       message: 'Verified via test suite: historical rows preserved with is_current flag'
+    });
+
+    const changedSalaries = await EmployeeRepository.listEmployees({ has_salary_change: true, limit: 5 });
+    results.push({
+      group: '5. Chronological Salary History',
+      name: 'Salary adjustment drilldown filter isolates modified employees with revision metadata',
+      status: changedSalaries.pagination.total > 0 ? 'pass' : 'fail',
+      message: `Filter has_salary_change=true returned ${changedSalaries.pagination.total.toLocaleString()} employees with previous salary & percentage change`
     });
 
     results.push({
@@ -598,9 +612,9 @@ apiRouter.get('/tests/run', async (req: Request, res: Response) => {
     const token = demoHr ? signAccessToken(UserRepository.toSafeUser(demoHr)) : '';
     results.push({
       group: '8. Authentication & Session Security',
-      name: 'Short-lived JWT signed and stored in HTTP-only cookie',
+      name: 'Signed JWT stored in HTTP-only cookie with refresh stability',
       status: token.length > 20 ? 'pass' : 'fail',
-      message: `JWT token generated (${token.length} chars) with 1h TTL and HttpOnly cookie attribute`
+      message: `JWT token generated (${token.length} chars) with 7d TTL and HttpOnly cookie attribute`
     });
 
     results.push({

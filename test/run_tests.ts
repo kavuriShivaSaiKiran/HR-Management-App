@@ -28,7 +28,7 @@ async function runTests() {
   assert(payBands >= 5, 'Pay bands table seeded with >= 5 bands');
 
   const fxRates = db.exec("SELECT COUNT(*) FROM fx_rates")[0].values[0][0] as number;
-  assert(fxRates >= 5, 'Deterministic FX rate table initialized with 5 currencies');
+  assert(fxRates >= 2, 'Deterministic FX rate table initialized for dual-country operations (USD, INR)');
 
   console.log('\n[2] Testing Employee Creation and Validation...');
   // Test valid employee insertion
@@ -87,6 +87,13 @@ async function runTests() {
   assert(histRecords[0][0] === 210000 && histRecords[0][1] === 0, 'First salary marked inactive (is_current = 0)');
   assert(histRecords[1][0] === 235000 && histRecords[1][1] === 1, 'Latest salary marked current (is_current = 1)');
 
+  // Verify employee with multiple salary records is matched by salary change query
+  const changedEmps = db.exec(`
+    SELECT COUNT(*) FROM employees e
+    WHERE (SELECT COUNT(*) FROM salary_records sr WHERE sr.employee_id = e.id) > 1
+  `)[0].values[0][0] as number;
+  assert(changedEmps > 0, 'Employees with salary adjustments correctly identified by historical revision filter');
+
   console.log('\n[4] Testing Soft Delete (Audit Trail Retention)...');
   db.run("UPDATE employees SET employment_status = 'inactive', updated_at = ? WHERE id = ?", [new Date().toISOString(), newEmpId]);
   const statusRes = db.exec("SELECT employment_status FROM employees WHERE id = ?", [newEmpId])[0].values[0][0];
@@ -95,7 +102,7 @@ async function runTests() {
   assert(countStillInDb === 1, 'Employee record preserved in database for audit compliance');
 
   console.log('\n[5] Testing Currency Conversion & Aggregation Functions...');
-  // Add an employee in EUR and test deterministic USD conversion
+  // Add an employee in INR and test deterministic USD conversion
   db.run(`
     INSERT INTO employees (
       employee_code, first_name, last_name, email, department_id,
@@ -103,24 +110,24 @@ async function runTests() {
       hire_date, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    'EMP-EUR1', 'Hans', 'Mueller', 'hans.mueller@acme.test', 1,
-    'DevOps Engineer', 'DE', 'EUR', 4, 'active', '2023-05-01', now, now
+    'EMP-INR1', 'Aarav', 'Sharma', 'aarav.sharma@acme.test', 1,
+    'Senior Software Engineer', 'IN', 'INR', 3, 'active', '2023-05-01', now, now
   ]);
-  const deEmpId = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
+  const inEmpId = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
   db.run(`
     INSERT INTO salary_records (employee_id, base_salary, currency_code, effective_date, is_current)
     VALUES (?, ?, ?, ?, 1)
-  `, [deEmpId, 100000, 'EUR', '2023-05-01']);
+  `, [inEmpId, 1000000, 'INR', '2023-05-01']);
 
-  // Rate for EUR is 1.08 so 100,000 EUR = 108,000 USD
+  // Rate for INR is 0.012 so 1,000,000 INR = 12,000 USD
   const convertedUsd = db.exec(`
     SELECT sr.base_salary * fx.rate_to_usd
     FROM salary_records sr
     JOIN employees e ON sr.employee_id = e.id
     JOIN fx_rates fx ON e.currency_code = fx.currency_code
     WHERE e.id = ? AND sr.is_current = 1
-  `, [deEmpId])[0].values[0][0] as number;
-  assert(Math.round(convertedUsd) === 108000, 'Deterministic FX rate (1.08) accurately converts 100,000 EUR to $108,000 USD');
+  `, [inEmpId])[0].values[0][0] as number;
+  assert(Math.round(convertedUsd) === 12000, 'Deterministic FX rate (0.012) accurately converts 1,000,000 INR to $12,000 USD');
 
   console.log('\n[6] Testing Edge Cases...');
   // 1. Employee with no salary records

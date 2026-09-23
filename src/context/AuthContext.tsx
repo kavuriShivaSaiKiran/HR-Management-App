@@ -16,41 +16,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [error, setError] = useState<string | null>(null);
 
   const refreshUser = async () => {
-    setIsLoading(true);
     try {
-      // If user explicitly signed out, do not attempt auto-login
-      if (isExplicitlyLoggedOut()) {
+      // Require an active session in the current browser window to restore session.
+      // This ensures the application starts cleanly with the sign-in page on initial launch.
+      const hasActiveSession = sessionStorage.getItem('acme_active_session') === 'true';
+      if (!hasActiveSession || isExplicitlyLoggedOut()) {
+        setStoredToken(null);
         setUser(null);
         setIsLoading(false);
         return;
       }
 
-      // Check current session
-      let res = await apiFetch('/api/auth/me');
+      // Check current session with backend
+      const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
         setError(null);
-        setIsLoading(false);
-        return;
+      } else {
+        sessionStorage.removeItem('acme_active_session');
+        setStoredToken(null);
+        setUser(null);
       }
-
-      // If session not found and not explicitly logged out, ensure fresh demo token
-      const token = await ensureAuthToken(true);
-      if (token) {
-        res = await apiFetch('/api/auth/me');
-        if (res.ok) {
-          const data = await res.json();
-          setUser(data.user);
-          setError(null);
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      setUser(null);
     } catch (err: any) {
       console.warn('Authentication check failed:', err.message);
+      sessionStorage.removeItem('acme_active_session');
+      setStoredToken(null);
       setUser(null);
     } finally {
       setIsLoading(false);
@@ -82,7 +73,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return false;
       }
 
-      // Save token to localStorage for iframe resilience
+      // Mark session as active and store token
+      sessionStorage.setItem('acme_active_session', 'true');
       if (data.token) {
         setStoredToken(data.token);
       }
@@ -100,6 +92,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = async (): Promise<void> => {
     try {
+      sessionStorage.removeItem('acme_active_session');
       setLoggedOutFlag(true);
       setStoredToken(null);
       await fetch('/api/auth/logout', {

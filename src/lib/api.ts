@@ -89,77 +89,22 @@ export function isExplicitlyLoggedOut(): boolean {
 let inflightAuthPromise: Promise<string | null> | null = null;
 
 /**
- * Ensure an active token exists. In preview/demo environments where third-party
- * cookies may be partitioned or blocked in iframes, automatically acquires a demo
- * HR Manager token unless the user explicitly clicked Sign Out.
- *
- * @param forceRefresh If true, discards existing token and fetches a brand new token from the server.
+ * Returns an active token if stored and valid.
+ * Does NOT auto-synthesize logins behind the scenes so the app starts cleanly with the sign-in page.
  */
-export async function ensureAuthToken(forceRefresh = false): Promise<string | null> {
-  if (!forceRefresh) {
-    const existing = getStoredToken();
-    if (existing && isTokenValid(existing)) {
-      return existing;
-    }
+export async function ensureAuthToken(_forceRefresh = false): Promise<string | null> {
+  const token = getStoredToken();
+  if (token && isTokenValid(token)) {
+    return token;
   }
-
-  // Clear stale token if forceRefresh requested
-  if (forceRefresh) {
-    setStoredToken(null);
-  }
-
-  if (isExplicitlyLoggedOut()) return null;
-
-  // Deduplicate concurrent requests
-  if (inflightAuthPromise) {
-    return inflightAuthPromise;
-  }
-
-  inflightAuthPromise = (async () => {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          email: 'hrmanager@acme.org',
-          password: 'AcmeHR@2026!'
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.token) {
-          setStoredToken(data.token);
-          setLoggedOutFlag(false);
-          return data.token;
-        }
-      } else {
-        // If login failed, clear stored token
-        setStoredToken(null);
-      }
-    } catch (err) {
-      console.warn('Auto-session restoration error:', err);
-    } finally {
-      inflightAuthPromise = null;
-    }
-    return null;
-  })();
-
-  return inflightAuthPromise;
+  return null;
 }
 
 /**
  * Unified fetch wrapper that attaches Authorization header and session credentials.
- * Automatically recovers from 401 errors by acquiring a fresh token and retrying.
  */
 export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
-  const isAuthEndpoint = urlStr.includes('/api/auth/login') || urlStr.includes('/api/auth/logout');
-
-  let token = getStoredToken();
-  if (!token && !isAuthEndpoint && !isExplicitlyLoggedOut()) {
-    token = await ensureAuthToken();
-  }
+  const token = getStoredToken();
 
   const headers = new Headers(init.headers || {});
   if (token && !headers.has('Authorization')) {
@@ -172,18 +117,9 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
     credentials: init.credentials || 'include'
   });
 
-  // If response is 401 and not an explicit logout or login attempt, force refresh token and retry once
-  if (response.status === 401 && !isAuthEndpoint && !isExplicitlyLoggedOut()) {
-    const freshToken = await ensureAuthToken(true);
-    if (freshToken) {
-      const retryHeaders = new Headers(init.headers || {});
-      retryHeaders.set('Authorization', `Bearer ${freshToken}`);
-      return fetch(input, {
-        ...init,
-        headers: retryHeaders,
-        credentials: init.credentials || 'include'
-      });
-    }
+  // If unauthorized, clear stored token
+  if (response.status === 401) {
+    setStoredToken(null);
   }
 
   return response;

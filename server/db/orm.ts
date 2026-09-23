@@ -106,6 +106,39 @@ export class EmployeeRepository {
       sqlParams.push(params.status);
     }
 
+    const isSalaryChangeOnly = params.has_salary_change === true || 
+                               params.has_salary_change === 'true' || 
+                               params.has_salary_change === '1';
+
+    if (isSalaryChangeOnly) {
+      if (params.start_date && params.end_date) {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM salary_records sr_filter 
+          WHERE sr_filter.employee_id = e.id 
+            AND sr_filter.previous_salary > 0 
+            AND sr_filter.base_salary != sr_filter.previous_salary
+            AND sr_filter.effective_date >= ? AND sr_filter.effective_date <= ?
+        )`);
+        sqlParams.push(params.start_date, params.end_date);
+      } else if (params.start_date) {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM salary_records sr_filter 
+          WHERE sr_filter.employee_id = e.id 
+            AND sr_filter.previous_salary > 0 
+            AND sr_filter.base_salary != sr_filter.previous_salary
+            AND sr_filter.effective_date >= ?
+        )`);
+        sqlParams.push(params.start_date);
+      } else {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM salary_records sr_filter 
+          WHERE sr_filter.employee_id = e.id 
+            AND sr_filter.previous_salary > 0 
+            AND sr_filter.base_salary != sr_filter.previous_salary
+        )`);
+      }
+    }
+
     const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
     // Count query
@@ -114,7 +147,10 @@ export class EmployeeRepository {
     const total = (countRes[0]?.values[0][0] as number) || 0;
 
     // Sorting
-    let orderBy = "e.id DESC";
+    let orderBy = isSalaryChangeOnly 
+      ? "COALESCE(sr_curr.effective_date, e.updated_at) DESC, e.id DESC"
+      : "e.id DESC";
+
     if (params.sort_by) {
       const dir = params.sort_order === 'asc' ? 'ASC' : 'DESC';
       switch (params.sort_by) {
@@ -136,10 +172,13 @@ export class EmployeeRepository {
         case 'role':
           orderBy = `e.role_title ${dir}`;
           break;
+        case 'recent_change':
+          orderBy = `COALESCE(sr_curr.effective_date, e.updated_at) ${dir}, e.id DESC`;
+          break;
       }
     }
 
-    // Data query with simple reference JOINs
+    // Data query with simple reference JOINs and latest salary change metadata
     const dataSql = `
       SELECT 
         e.id, e.employee_code, e.first_name, e.last_name, e.email,
@@ -148,10 +187,15 @@ export class EmployeeRepository {
         e.pay_band_id, pb.name as pay_band_name,
         e.employment_status, e.hire_date, e.created_at, e.updated_at,
         e.current_salary,
-        (e.current_salary * (CASE WHEN e.currency_code = 'INR' THEN 0.012 ELSE 1.0 END)) as current_salary_usd
+        (e.current_salary * (CASE WHEN e.currency_code = 'INR' THEN 0.012 ELSE 1.0 END)) as current_salary_usd,
+        sr_curr.previous_salary,
+        sr_curr.reason as latest_change_reason,
+        sr_curr.effective_date as latest_change_date,
+        (SELECT COUNT(*) FROM salary_records sr_cnt WHERE sr_cnt.employee_id = e.id AND sr_cnt.previous_salary > 0 AND sr_cnt.base_salary != sr_cnt.previous_salary) as salary_change_count
       FROM employees e
       LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN pay_bands pb ON e.pay_band_id = pb.id
+      LEFT JOIN salary_records sr_curr ON sr_curr.employee_id = e.id AND sr_curr.is_current = 1 AND sr_curr.previous_salary > 0 AND sr_curr.base_salary != sr_curr.previous_salary
       ${whereClause}
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?
@@ -170,26 +214,51 @@ export class EmployeeRepository {
       };
     }
 
-    const employees: Employee[] = dataRes[0].values.map(row => ({
-      id: row[0] as number,
-      employee_code: row[1] as string,
-      first_name: row[2] as string,
-      last_name: row[3] as string,
-      email: row[4] as string,
-      department_id: row[5] as number,
-      department_name: row[6] as string,
-      role_title: row[7] as string,
-      country_code: row[8] as string,
-      currency_code: row[9] as string,
-      pay_band_id: row[10] as number,
-      pay_band_name: row[11] as string,
-      employment_status: row[12] as 'active' | 'inactive',
-      hire_date: row[13] as string,
-      created_at: row[14] as string,
-      updated_at: row[15] as string,
-      current_salary: row[16] as number,
-      current_salary_usd: row[17] ? Math.round(row[17] as number) : undefined
-    }));
+    const employees: Employee[] = dataRes[0].values.map(row => {
+      const curSalary = row[16] as number;
+      const prevSalary = row[18] != null ? Number(row[18]) : undefined;
+      const changeReason = row[19] ? (row[19] as string) : undefined;
+      const changeDate = row[20] ? (row[20] as string) : undefined;
+      const changeCount = Number(row[21] || 0);
+
+      const hasChange = Boolean(
+        changeCount > 0 && 
+        prevSalary != null && 
+        prevSalary > 0 && 
+        Math.abs(curSalary - prevSalary) > 0.01
+      );
+
+      const adjustmentPct = hasChange && prevSalary && prevSalary > 0
+        ? ((curSalary - prevSalary) / prevSalary) * 100
+        : undefined;
+
+      return {
+        id: row[0] as number,
+        employee_code: row[1] as string,
+        first_name: row[2] as string,
+        last_name: row[3] as string,
+        email: row[4] as string,
+        department_id: row[5] as number,
+        department_name: row[6] as string,
+        role_title: row[7] as string,
+        country_code: row[8] as string,
+        currency_code: row[9] as string,
+        pay_band_id: row[10] as number,
+        pay_band_name: row[11] as string,
+        employment_status: row[12] as 'active' | 'inactive',
+        hire_date: row[13] as string,
+        created_at: row[14] as string,
+        updated_at: row[15] as string,
+        current_salary: curSalary,
+        current_salary_usd: row[17] ? Math.round(row[17] as number) : undefined,
+        has_salary_change: hasChange,
+        previous_salary: prevSalary,
+        latest_adjustment_pct: adjustmentPct,
+        latest_adjustment_reason: changeReason,
+        latest_adjustment_date: changeDate,
+        salary_change_count: changeCount
+      };
+    });
 
     return {
       data: employees,

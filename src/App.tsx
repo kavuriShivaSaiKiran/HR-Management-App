@@ -89,6 +89,7 @@ function CompensationPortal() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
+  const [salaryChangedOnly, setSalaryChangedOnly] = useState<boolean>(false);
 
   // Shared Analysis Period State across Dashboard and Compensation Insights
   const [analysisPeriod, setAnalysisPeriod] = useState<AnalysisPeriodState>(() => loadStoredPeriod());
@@ -197,6 +198,16 @@ function CompensationPortal() {
       if (selectedBand) params.set('pay_band_id', selectedBand);
       if (selectedStatus && selectedStatus !== 'all') params.set('status', selectedStatus);
 
+      if (salaryChangedOnly) {
+        params.set('has_salary_change', 'true');
+        if (analysisPeriod?.startDate && analysisPeriod.period !== 'snapshot') {
+          params.set('start_date', analysisPeriod.startDate);
+        }
+        if (analysisPeriod?.endDate && analysisPeriod.period !== 'snapshot') {
+          params.set('end_date', analysisPeriod.endDate);
+        }
+      }
+
       const res = await apiFetch(`/api/employees?${params.toString()}`);
       const data = await res.json();
       setEmployeesData(data);
@@ -205,18 +216,33 @@ function CompensationPortal() {
     } finally {
       setIsLoadingEmployees(false);
     }
-  }, [page, limit, sortBy, sortOrder, search, selectedDept, selectedCountry, selectedBand, selectedStatus]);
+  }, [page, limit, sortBy, sortOrder, search, selectedDept, selectedCountry, selectedBand, selectedStatus, salaryChangedOnly, analysisPeriod]);
 
-  // Initial load
+  // Sync active user role
   useEffect(() => {
+    if (user) {
+      if (user.role === 'EMPLOYEE') {
+        setUserRole('employee');
+        setUserEmail(user.email);
+      } else {
+        setUserRole('hr.global');
+        setUserEmail(user.email);
+      }
+    }
+  }, [user]);
+
+  // Initial load once authenticated
+  useEffect(() => {
+    if (!user) return;
     fetchMeta();
     fetchDashboardData();
-  }, []);
+  }, [user]);
 
-  // Re-fetch employees when filters/pagination change
+  // Re-fetch employees when filters/pagination change (only once authenticated)
   useEffect(() => {
+    if (!user) return;
     fetchEmployees();
-  }, [fetchEmployees]);
+  }, [fetchEmployees, user]);
 
   // Handle Tab Switch
   const handleTabChange = (tab: TabType) => {
@@ -451,10 +477,30 @@ function CompensationPortal() {
                   departments={departments}
                   analysisPeriod={analysisPeriod}
                   onPeriodChange={handlePeriodChange}
-                  onNavigateToEmployees={(country, dept) => {
+                  onNavigateToEmployees={(country, dept, options) => {
                     if (country && country !== 'all') setSelectedCountry(country);
                     if (dept && dept !== 'all') setSelectedDept(dept);
+                    if (options?.salaryChangedOnly !== undefined) {
+                      setSalaryChangedOnly(options.salaryChangedOnly);
+                      if (options.salaryChangedOnly) {
+                        setSortBy('recent_change');
+                        setSortOrder('desc');
+                      }
+                    }
+                    if (options?.search) {
+                      setSearch(options.search);
+                    }
+                    setPage(1);
                     setActiveTab('employees');
+                  }}
+                  onOpenHistory={async (empId) => {
+                    try {
+                      const res = await apiFetch(`/api/employees/${empId}`);
+                      const emp = await res.json();
+                      setHistoryEmployee(emp);
+                    } catch (err) {
+                      console.error(err);
+                    }
                   }}
                   onOpenEditSalary={async (empId) => {
                     try {
@@ -497,6 +543,19 @@ function CompensationPortal() {
                   onOpenSalaryChange={(emp) => setSalaryChangeEmployee(emp)}
                   onOpenHistory={(emp) => setHistoryEmployee(emp)}
                   isLoading={isLoadingEmployees}
+                  salaryChangedOnly={salaryChangedOnly}
+                  onToggleSalaryChangedOnly={(val) => {
+                    setSalaryChangedOnly(val);
+                    setPage(1);
+                    if (val) {
+                      setSortBy('recent_change');
+                      setSortOrder('desc');
+                    } else if (sortBy === 'recent_change') {
+                      setSortBy('id');
+                      setSortOrder('desc');
+                    }
+                  }}
+                  periodLabel={analysisPeriod?.label}
                 />
               )}
 

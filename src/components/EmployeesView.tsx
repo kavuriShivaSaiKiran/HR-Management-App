@@ -17,7 +17,11 @@ import {
   Globe,
   Plus,
   RefreshCw,
-  Layers
+  Layers,
+  TrendingUp,
+  Users,
+  X,
+  Clock
 } from 'lucide-react';
 import { Employee, Department, PayBand, PaginatedResponse } from '../types';
 import { cn, getInitials } from '../lib/utils';
@@ -49,6 +53,9 @@ interface EmployeesViewProps {
   onOpenSalaryChange: (emp: Employee) => void;
   onOpenHistory?: (emp: Employee) => void;
   isLoading: boolean;
+  salaryChangedOnly?: boolean;
+  onToggleSalaryChangedOnly?: (val: boolean) => void;
+  periodLabel?: string;
 }
 
 export const EmployeesView: React.FC<EmployeesViewProps> = ({
@@ -77,7 +84,10 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   onOpenAddModal,
   onOpenSalaryChange,
   onOpenHistory,
-  isLoading
+  isLoading,
+  salaryChangedOnly = false,
+  onToggleSalaryChangedOnly,
+  periodLabel
 }) => {
   const [viewMode, setViewMode] = useState<'table' | 'cards'>(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -154,6 +164,51 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
+        {/* Quick Mode Filters */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onToggleSalaryChangedOnly?.(false)}
+              className={cn(
+                "px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5",
+                !salaryChangedOnly
+                  ? "bg-slate-900 text-white shadow-xs"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>All Employees</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onToggleSalaryChangedOnly?.(true)}
+              className={cn(
+                "px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5",
+                salaryChangedOnly
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+              )}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>⚡ Salary Adjustments Only</span>
+              {salaryChangedOnly && (
+                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-emerald-700 text-white rounded-full font-mono font-bold">
+                  {total.toLocaleString()}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {salaryChangedOnly && (
+            <div className="text-xs text-emerald-800 font-medium flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+              <Clock className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Showing staff with recorded salary revisions{periodLabel ? ` in ${periodLabel}` : ''}</span>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
           {/* Search Box */}
           <div className="relative lg:col-span-2">
@@ -273,6 +328,35 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         )}
       </div>
 
+      {/* Active Salary Adjustments Mode Banner */}
+      {salaryChangedOnly && (
+        <div className="bg-gradient-to-r from-emerald-500/10 via-emerald-50 to-blue-50 border border-emerald-300/80 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-900 flex items-center gap-2">
+                <span>Filtering By Recent Salary Adjustments</span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono text-[11px] font-bold">
+                  {total.toLocaleString()} found
+                </span>
+              </div>
+              <p className="text-slate-600 text-[11px] mt-0.5">
+                Showing all employees whose compensation was revised{periodLabel ? ` in ${periodLabel}` : ''}. Review the changes or examine full audit logs.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onToggleSalaryChangedOnly?.(false)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-2xs transition self-start sm:self-auto cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5 text-slate-400" />
+            <span>Show All Employees</span>
+          </button>
+        </div>
+      )}
+
       {/* Main Content: Table or Cards */}
       {viewMode === 'table' ? (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -337,12 +421,26 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                               {getInitials(emp.first_name, emp.last_name)}
                             </div>
                             <div className="min-w-0">
-                              <div
-                                onClick={() => onSelectEmployee(emp)}
-                                className="font-bold text-slate-900 hover:text-blue-600 cursor-pointer transition truncate flex items-center gap-1.5"
-                              >
-                                <span>{emp.first_name} {emp.last_name}</span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  onClick={() => onSelectEmployee(emp)}
+                                  className="font-bold text-slate-900 hover:text-blue-600 cursor-pointer transition truncate"
+                                >
+                                  {emp.first_name} {emp.last_name}
+                                </span>
                                 <span className="font-mono text-[10px] text-slate-400">({emp.employee_code})</span>
+                                {emp.has_salary_change && emp.latest_adjustment_pct !== undefined && (
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0",
+                                      emp.latest_adjustment_pct >= 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                                    )}
+                                    title={`${emp.latest_adjustment_reason || 'Salary revision'}${emp.latest_adjustment_date ? ` on ${emp.latest_adjustment_date}` : ''}`}
+                                  >
+                                    <TrendingUp className="w-2.5 h-2.5" />
+                                    {emp.latest_adjustment_pct >= 0 ? '+' : ''}{emp.latest_adjustment_pct.toFixed(1)}%
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[11px] text-slate-400 truncate">{emp.email}</div>
                             </div>
@@ -375,8 +473,16 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                         </td>
 
                         {/* Annual Base Salary (Local Currency) */}
-                        <td className="py-3.5 px-3 text-right whitespace-nowrap font-black font-mono text-slate-900">
-                          {currencySymbol}{emp.current_salary?.toLocaleString()}
+                        <td className="py-3.5 px-3 text-right whitespace-nowrap">
+                          <div className="font-black font-mono text-slate-900">
+                            {currencySymbol}{emp.current_salary?.toLocaleString()}
+                          </div>
+                          {emp.has_salary_change && emp.previous_salary ? (
+                            <div className="text-[10px] text-slate-500 font-mono flex items-center justify-end gap-1 mt-0.5">
+                              <span className="text-slate-400">Was:</span>
+                              <span className="line-through">{currencySymbol}{emp.previous_salary.toLocaleString()}</span>
+                            </div>
+                          ) : null}
                         </td>
 
                         {/* USD Equivalent */}
@@ -463,7 +569,21 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                         <span className="text-[11px] text-slate-400 font-mono">{emp.employee_code}</span>
                       </div>
                     </div>
-                    <span className="text-sm">{isIndia ? '🇮🇳' : '🇺🇸'}</span>
+                    <div className="flex items-center gap-1.5">
+                      {emp.has_salary_change && emp.latest_adjustment_pct !== undefined && (
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0",
+                            emp.latest_adjustment_pct >= 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                          )}
+                          title={`${emp.latest_adjustment_reason || 'Salary revision'}${emp.latest_adjustment_date ? ` on ${emp.latest_adjustment_date}` : ''}`}
+                        >
+                          <TrendingUp className="w-3 h-3" />
+                          <span>{emp.latest_adjustment_pct >= 0 ? '+' : ''}{emp.latest_adjustment_pct.toFixed(1)}%</span>
+                        </span>
+                      )}
+                      <span className="text-sm">{isIndia ? '🇮🇳' : '🇺🇸'}</span>
+                    </div>
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
@@ -489,6 +609,12 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                       <span className="text-base font-black text-slate-900 font-mono">
                         {currencySymbol}{emp.current_salary?.toLocaleString()}
                       </span>
+                      {emp.has_salary_change && emp.previous_salary ? (
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          <span className="text-slate-400">Was: </span>
+                          <span className="line-through">{currencySymbol}{emp.previous_salary.toLocaleString()}</span>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="text-right">
                       <span className="text-[10px] uppercase font-bold text-slate-400 block">USD Equiv.</span>

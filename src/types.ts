@@ -88,6 +88,13 @@ export interface Employee {
   current_salary?: number;
   current_salary_usd?: number;
   salary_records?: SalaryRecord[];
+  // Salary revision metadata
+  has_salary_change?: boolean;
+  previous_salary?: number;
+  latest_adjustment_pct?: number;
+  latest_adjustment_reason?: string;
+  latest_adjustment_date?: string;
+  salary_change_count?: number;
 }
 
 export interface EmployeeFilterParams {
@@ -100,6 +107,9 @@ export interface EmployeeFilterParams {
   limit?: number;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
+  has_salary_change?: boolean | string;
+  start_date?: string;
+  end_date?: string;
 }
 
 export interface PaginatedResponse<T> {

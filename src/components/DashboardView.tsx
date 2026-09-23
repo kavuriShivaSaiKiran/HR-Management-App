@@ -44,14 +44,19 @@ import {
   AnalysisPeriodState,
   PeriodTrendPoint
 } from '../types';
-import { apiFetch, ensureAuthToken } from '../lib/api';
+import { apiFetch } from '../lib/api';
 import { formatCurrency, cn, getInitials } from '../lib/utils';
 import { formatAsOfDate, DEFAULT_AS_OF_DATE, loadStoredPeriod } from '../lib/periodUtils';
 import { AnalysisPeriodFilter } from './AnalysisPeriodFilter';
 
 interface DashboardViewProps {
-  onNavigateToEmployees: (countryFilter?: string, deptFilter?: string) => void;
+  onNavigateToEmployees: (
+    countryFilter?: string, 
+    deptFilter?: string, 
+    options?: { salaryChangedOnly?: boolean; search?: string }
+  ) => void;
   onOpenEditSalary?: (employeeId: number) => void;
+  onOpenHistory?: (employeeId: number) => void;
   departments: Department[];
   analysisPeriod?: AnalysisPeriodState;
   onPeriodChange?: (nextPeriod: AnalysisPeriodState) => void;
@@ -60,6 +65,7 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToEmployees,
   onOpenEditSalary,
+  onOpenHistory,
   departments,
   analysisPeriod: externalPeriod,
   onPeriodChange: externalOnPeriodChange
@@ -92,12 +98,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (periodState.endDate) params.append('end_date', periodState.endDate);
       if (periodState.asOfDate) params.append('as_of_date', periodState.asOfDate);
 
-      let res = await apiFetch(`/api/dashboard?${params.toString()}`);
-      if (res.status === 401) {
-        // Fallback retry with freshly acquired demo token
-        await ensureAuthToken(true);
-        res = await apiFetch(`/api/dashboard?${params.toString()}`);
-      }
+      const res = await apiFetch(`/api/dashboard?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const data: DashboardResponse = await res.json();
       setDashboardData(data);
@@ -221,9 +222,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <button
-            onClick={() => {
-              ensureAuthToken(true).then(() => fetchDashboard());
-            }}
+            onClick={() => fetchDashboard()}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer shrink-0"
           >
             <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
@@ -1112,8 +1111,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </p>
               </div>
               <button
-                onClick={() => onNavigateToEmployees()}
-                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                onClick={() => onNavigateToEmployees(
+                  selectedCountry !== 'all' ? selectedCountry : undefined,
+                  selectedDept !== 'all' ? selectedDept : undefined,
+                  { salaryChangedOnly: true }
+                )}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                title="Filter directory to only show employees whose salary was changed"
               >
                 <span>View All In Directory</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1140,9 +1144,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       return (
                         <tr key={change.id} className="hover:bg-slate-50/80 transition">
                           <td className="py-2.5">
-                            <div className="font-bold text-slate-900">{change.employee_name}</div>
+                            <button
+                              onClick={() => onNavigateToEmployees(undefined, undefined, { search: change.employee_code })}
+                              className="font-bold text-slate-900 hover:text-blue-600 transition text-left cursor-pointer truncate block max-w-[190px]"
+                              title={`View ${change.employee_name} (${change.employee_code}) in Directory`}
+                            >
+                              {change.employee_name}
+                            </button>
                             <div className="text-[10px] text-slate-400">
-                              {change.employee_code} &bull; {change.role_title}
+                              <span 
+                                onClick={() => onNavigateToEmployees(undefined, undefined, { search: change.employee_code })}
+                                className="font-mono text-slate-500 hover:text-blue-600 cursor-pointer"
+                              >
+                                {change.employee_code}
+                              </span> &bull; {change.role_title}
                             </div>
                           </td>
                           <td className="py-2.5">
@@ -1167,14 +1182,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             {change.effective_date}
                           </td>
                           <td className="py-2.5 text-right">
-                            {onOpenEditSalary && (
-                              <button
-                                onClick={() => onOpenEditSalary(change.employee_id)}
-                                className="text-blue-600 hover:text-blue-800 font-bold text-[11px]"
-                              >
-                                Edit
-                              </button>
-                            )}
+                            <div className="flex items-center justify-end gap-2">
+                              {onOpenHistory && (
+                                <button
+                                  onClick={() => onOpenHistory(change.employee_id)}
+                                  className="text-slate-500 hover:text-slate-800 font-semibold text-[11px] cursor-pointer"
+                                  title="View audit history"
+                                >
+                                  History
+                                </button>
+                              )}
+                              {onOpenEditSalary && (
+                                <button
+                                  onClick={() => onOpenEditSalary(change.employee_id)}
+                                  className="text-blue-600 hover:text-blue-800 font-bold text-[11px] cursor-pointer"
+                                  title="Edit salary"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1199,8 +1226,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <div key={change.id} className="p-3 bg-slate-50/70 border border-slate-200/80 rounded-xl space-y-2">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="font-bold text-slate-900 text-xs">{change.employee_name}</div>
-                          <div className="text-[10px] text-slate-400">{change.role_title} &bull; {change.department_name}</div>
+                          <button
+                            onClick={() => onNavigateToEmployees(undefined, undefined, { search: change.employee_code })}
+                            className="font-bold text-slate-900 text-xs text-left hover:text-blue-600 cursor-pointer block"
+                          >
+                            {change.employee_name}
+                          </button>
+                          <div className="text-[10px] text-slate-400">
+                            <span 
+                              onClick={() => onNavigateToEmployees(undefined, undefined, { search: change.employee_code })}
+                              className="font-mono text-slate-500 hover:text-blue-600 cursor-pointer"
+                            >
+                              {change.employee_code}
+                            </span> &bull; {change.role_title} &bull; {change.department_name}
+                          </div>
                         </div>
                         <span
                           className={cn(
@@ -1223,10 +1262,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white border border-slate-200 text-slate-600">
                             {change.reason}
                           </span>
+                          {onOpenHistory && (
+                            <button
+                              onClick={() => onOpenHistory(change.employee_id)}
+                              className="text-xs font-semibold text-slate-600 px-2 py-1 bg-white border border-slate-200 rounded-lg cursor-pointer"
+                            >
+                              History
+                            </button>
+                          )}
                           {onOpenEditSalary && (
                             <button
                               onClick={() => onOpenEditSalary(change.employee_id)}
-                              className="text-xs font-bold text-blue-600 px-2 py-1 bg-white border border-slate-200 rounded-lg"
+                              className="text-xs font-bold text-blue-600 px-2 py-1 bg-white border border-slate-200 rounded-lg cursor-pointer"
                             >
                               Edit
                             </button>
