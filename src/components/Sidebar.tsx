@@ -8,11 +8,12 @@ import {
   Headphones,
   PanelLeftClose,
   PanelLeftOpen,
-  X
+  X,
+  BookOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export type TabType = 'dashboard' | 'employees' | 'insights' | 'settings';
+export type TabType = 'dashboard' | 'employees' | 'insights' | 'settings' | 'about';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -70,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="text-base font-extrabold tracking-tight text-slate-900 truncate">
                 ACME Compensation
               </span>
-              <span className="text-[10px] text-slate-400 font-medium truncate">Salary & Band Management</span>
+              <span className="text-[10px] text-slate-400 font-medium truncate">Compensation & Salary Management</span>
             </div>
           </div>
 
@@ -136,6 +137,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bottom Section */}
       <div className="p-4 space-y-3 border-t border-slate-100">
+        {/* Bottom Navigation: About & Artifacts (Only at bottom of sidebar) */}
+        <button
+          onClick={() => handleNavClick('about')}
+          className={cn(
+            "w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 cursor-pointer",
+            activeTab === 'about'
+              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+              : "bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200/80"
+          )}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <BookOpen className={cn("w-4 h-4 shrink-0", activeTab === 'about' ? "text-white" : "text-blue-600")} />
+            <span className="truncate">About & Artifacts</span>
+          </div>
+          <span className={cn(
+            "text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider",
+            activeTab === 'about' ? "bg-blue-700 text-blue-100" : "bg-white text-slate-600 border border-slate-200"
+          )}>
+            Docs & Tests
+          </span>
+        </button>
+
         {/* Company & Entity Scope Display */}
         <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 hover:border-slate-200 bg-slate-50/50 transition">
           <div className="flex items-center gap-2.5 overflow-hidden">
@@ -144,7 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="truncate">
               <p className="text-xs font-semibold text-slate-800 truncate">
-                Global Operations
+                Global Workforce
               </p>
               <p className="text-[10px] text-slate-400">
                 10,000 Staff &bull; IN 69% &bull; US 31%
@@ -214,17 +237,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Collapsed Bottom Action */}
-      <div className="flex flex-col items-center gap-2 w-full">
-        {onToggleCollapse && (
-          <button
-            onClick={onToggleCollapse}
-            className="p-2 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
-            title="Expand sidebar"
-          >
-            <PanelLeftOpen className="w-5 h-5" />
-          </button>
-        )}
+      {/* Collapsed Bottom: About Navigation & Entity indicator */}
+      <div className="flex flex-col items-center gap-2.5 w-full px-2">
+        <button
+          onClick={() => handleNavClick('about')}
+          title="About & Engineering Artifacts"
+          aria-label="About & Engineering Artifacts"
+          className={cn(
+            "relative w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-150 cursor-pointer group",
+            activeTab === 'about'
+              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+              : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          )}
+        >
+          <BookOpen className={cn("w-5 h-5", activeTab === 'about' ? "text-white" : "text-blue-600")} />
+          {activeTab === 'about' && (
+            <span className="absolute left-0 w-1 h-6 bg-white rounded-r-full" />
+          )}
+        </button>
+
+        <div
+          className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-center text-xs"
+          title="Global Workforce (10,000 Employees)"
+        >
+          🌐
+        </div>
       </div>
     </div>
   );

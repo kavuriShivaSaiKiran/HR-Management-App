@@ -15,6 +15,7 @@ import {
   Layers,
   Scale
 } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 interface SettingsViewProps {
   onTriggerReseed?: () => void;
@@ -42,7 +43,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setLocalReseeding(true);
     setReseedSuccessMsg(null);
     try {
-      const res = await fetch('/api/seed', { method: 'POST' });
+      const res = await apiFetch('/api/seed', { method: 'POST' });
       if (!res.ok) throw new Error('Failed to seed');
       setReseedSuccessMsg('10,000 employee profiles generated (3,100 US / 6,900 India)!');
       if (onReseedComplete) onReseedComplete();

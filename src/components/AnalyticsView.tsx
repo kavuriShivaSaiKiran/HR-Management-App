@@ -24,6 +24,7 @@ import {
   SalaryDistributionGroup,
   RoleComparisonGroup
 } from '../types';
+import { apiFetch } from '../lib/api';
 import { formatCurrency, cn } from '../lib/utils';
 
 export const AnalyticsView: React.FC = () => {
@@ -42,15 +43,15 @@ export const AnalyticsView: React.FC = () => {
       setIsLoading(true);
       try {
         if (activeSubTab === 'payroll') {
-          const res = await fetch(`/api/analytics/payroll-cost?group_by=${payrollGroupBy}`);
+          const res = await apiFetch(`/api/analytics/payroll-cost?group_by=${payrollGroupBy}`);
           const json = await res.json();
           setPayrollCostData(json.data || []);
         } else if (activeSubTab === 'distribution') {
-          const res = await fetch('/api/analytics/salary-distribution?group_by=pay_band');
+          const res = await apiFetch('/api/analytics/salary-distribution?group_by=pay_band');
           const json = await res.json();
           setDistributionData(json.data || []);
         } else if (activeSubTab === 'comparison') {
-          const res = await fetch(`/api/analytics/comparison?dimension=role&group_by=${comparisonGroupBy}`);
+          const res = await apiFetch(`/api/analytics/comparison?dimension=role&group_by=${comparisonGroupBy}`);
           const json = await res.json();
           setComparisonData(json.data || []);
         }

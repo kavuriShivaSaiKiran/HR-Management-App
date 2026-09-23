@@ -1013,10 +1013,10 @@ export class EmployeeRepository {
 
     // Monthly breakdown for ranges >= 45 days (3m, 6m, 12m)
     if (diffDays >= 45) {
-      const points: PeriodTrendPoint[] = [];
       const cur = new Date(startDate);
       const end = new Date(endDate);
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const rawMonths: { monthLabel: string; monthStr: string; adjCount: number; incUsd: number; avgPct: number }[] = [];
 
       while (cur <= end) {
         const year = cur.getFullYear();
@@ -1041,17 +1041,38 @@ export class EmployeeRepository {
         const incUsd = Math.round((monthRes[0]?.values[0][1] as number) || 0);
         const avgPct = Math.round(((monthRes[0]?.values[0][2] as number) || 0) * 10) / 10;
 
-        points.push({
-          date_label: monthLabel,
-          date: monthStr,
-          payroll_usd: Math.round(baseMonthlyUsd + (points.length * (incUsd / 12))),
-          salary_adjustments_count: adjCount,
-          total_increase_usd: incUsd,
-          avg_adjustment_pct: avgPct
+        rawMonths.push({
+          monthLabel,
+          monthStr,
+          adjCount,
+          incUsd,
+          avgPct
         });
 
         cur.setMonth(cur.getMonth() + 1);
         cur.setDate(1);
+      }
+
+      // Compute realistic cumulative monthly compensation progression:
+      // Starts from the monthly payroll prior to these adjustments and accumulates increases to reach current baseMonthlyUsd
+      const totalMonthlyIncrease = rawMonths.reduce((acc, m) => acc + (m.incUsd / 12), 0);
+      let runningMonthlyPayroll = Math.max(100000, Math.round(baseMonthlyUsd - totalMonthlyIncrease));
+
+      const points: PeriodTrendPoint[] = [];
+      for (let idx = 0; idx < rawMonths.length; idx++) {
+        const m = rawMonths[idx];
+        runningMonthlyPayroll += Math.round(m.incUsd / 12);
+        // Ensure the final month matches current monthly payroll closely
+        const displayedPayroll = idx === rawMonths.length - 1 ? baseMonthlyUsd : runningMonthlyPayroll;
+
+        points.push({
+          date_label: m.monthLabel,
+          date: m.monthStr,
+          payroll_usd: displayedPayroll,
+          salary_adjustments_count: m.adjCount,
+          total_increase_usd: m.incUsd,
+          avg_adjustment_pct: m.avgPct
+        });
       }
       return points;
     } else if (diffDays >= 15) {
@@ -1487,17 +1508,44 @@ export class EmployeeRepository {
       ORDER BY total_comp DESC
     `;
     const deptRes = db.exec(deptSql, params);
+
+    // Exact medians by department
+    const deptSalSql = `
+      SELECT e.department_id, (e.current_salary * (CASE WHEN e.currency_code = 'INR' THEN 0.012 ELSE 1.0 END)) as sal_usd
+      FROM employees e
+      WHERE e.employment_status = 'active'
+        ${normalizedCountry ? `AND e.country_code = '${normalizedCountry}'` : ''}
+      ORDER BY e.department_id, sal_usd ASC
+    `;
+    const deptSalRes = db.exec(deptSalSql);
+    const deptMedMap = new Map<number, number>();
+    if (deptSalRes.length && deptSalRes[0].values) {
+      const grouped = new Map<number, number[]>();
+      for (const row of deptSalRes[0].values) {
+        const dId = row[0] as number;
+        const sal = row[1] as number;
+        if (!grouped.has(dId)) grouped.set(dId, []);
+        grouped.get(dId)!.push(sal);
+      }
+      for (const [dId, sals] of grouped.entries()) {
+        const mid = Math.floor(sals.length / 2);
+        const med = sals.length % 2 === 1 ? sals[mid] : (sals[mid - 1] + sals[mid]) / 2;
+        deptMedMap.set(dId, Math.round(med));
+      }
+    }
+
     const departmentBreakdown = (deptRes.length && deptRes[0].values) ? deptRes[0].values.map(r => {
+      const dId = r[0] as number;
       const deptCnt = r[2] as number;
       const comp = Math.round((r[3] as number) || 0);
       const avg = Math.round((r[4] as number) || 0);
       return {
-        department_id: r[0] as number,
+        department_id: dId,
         department_name: r[1] as string,
         employee_count: deptCnt,
         total_comp_usd: comp,
         avg_salary_usd: avg,
-        median_salary_usd: Math.round(avg * 0.96),
+        median_salary_usd: deptMedMap.get(dId) || Math.round(avg * 0.95),
         pct_workforce: totalEmployees > 0 ? Math.round((deptCnt / totalEmployees) * 1000) / 10 : 0,
         comp_share_pct: totalCompUsd > 0 ? Math.round((comp / totalCompUsd) * 1000) / 10 : 0
       };
@@ -1507,8 +1555,8 @@ export class EmployeeRepository {
     const bandsSql = `
       SELECT 
         pb.name,
-        pb.min_salary,
-        pb.max_salary,
+        COALESCE(ROUND(MIN(e.current_salary * (CASE WHEN e.currency_code = 'INR' THEN 0.012 ELSE 1.0 END))), pb.min_salary) as min_sal,
+        COALESCE(ROUND(MAX(e.current_salary * (CASE WHEN e.currency_code = 'INR' THEN 0.012 ELSE 1.0 END))), pb.max_salary) as max_sal,
         COUNT(e.id) as emp_count,
         AVG(e.current_salary * (CASE WHEN e.currency_code = 'INR' THEN 0.012 ELSE 1.0 END)) as avg_comp
       FROM pay_bands pb
@@ -1784,17 +1832,44 @@ export class EmployeeRepository {
       ORDER BY dept_comp DESC
     `;
     const deptRes = db.exec(deptSql);
+
+    // Exact department medians
+    const deptSalSql = `
+      SELECT COALESCE(d.name, 'Unassigned') as d_name, (e.current_salary * (CASE WHEN e.currency_code = 'INR' THEN 0.012 ELSE 1.0 END)) as sal_usd
+      FROM employees e
+      LEFT JOIN departments d ON e.department_id = d.id
+      WHERE e.employment_status = 'active'
+      ORDER BY d_name, sal_usd ASC
+    `;
+    const deptSalRes = db.exec(deptSalSql);
+    const deptMedMap = new Map<string, number>();
+    if (deptSalRes.length && deptSalRes[0].values) {
+      const grouped = new Map<string, number[]>();
+      for (const row of deptSalRes[0].values) {
+        const dName = row[0] as string;
+        const sal = row[1] as number;
+        if (!grouped.has(dName)) grouped.set(dName, []);
+        grouped.get(dName)!.push(sal);
+      }
+      for (const [dName, sals] of grouped.entries()) {
+        const mid = Math.floor(sals.length / 2);
+        const med = sals.length % 2 === 1 ? sals[mid] : (sals[mid - 1] + sals[mid]) / 2;
+        deptMedMap.set(dName, Math.round(med));
+      }
+    }
+
     const byDepartment: DepartmentInsight[] = (deptRes.length && deptRes[0].values) ? deptRes[0].values.map(r => {
+      const dName = r[0] as string;
       const cnt = r[1] as number;
       const comp = Math.round((r[2] as number) || 0);
       const avg = Math.round((r[3] as number) || 0);
       return {
-        department: r[0] as string,
+        department: dName,
         employee_count: cnt,
         pct_organization: totalEmp > 0 ? Math.round((cnt / totalEmp) * 1000) / 10 : 0,
         total_compensation_usd: comp,
         avg_salary_usd: avg,
-        median_salary_usd: Math.round(avg * 0.96),
+        median_salary_usd: deptMedMap.get(dName) || Math.round(avg * 0.95),
         comp_share_pct: totalComp > 0 ? Math.round((comp / totalComp) * 1000) / 10 : 0
       };
     }) : [];

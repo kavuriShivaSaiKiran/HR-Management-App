@@ -20,10 +20,10 @@ export const APP_CARDS_REFERENCE: TabCardGuide[] = [
     cards: [
       {
         cardTitle: 'Metric KPI Cards (Top Row)',
-        purpose: 'Displays high-level operational statistics: Total Employees, Monthly Payroll, Average Salary, and Active Headcount.',
+        purpose: 'Displays high-level operational statistics: Total Employees, Monthly Compensation, Average Salary, and Active Headcount.',
         keyMetricsOrActions: [
           'Total Employees count with active vs inactive split',
-          'Normalized monthly payroll expenditure in USD',
+          'Normalized monthly compensation expenditure in USD',
           'Organization-wide average annual base salary',
           'Dynamic monthly growth percentages with status trends'
         ],

@@ -5,6 +5,7 @@ import { DashboardView } from './components/DashboardView';
 import { EmployeesView } from './components/EmployeesView';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
+import { AboutView } from './components/AboutView';
 import { EmployeePortalView } from './components/EmployeePortalView';
 import { LoginModal } from './components/LoginModal';
 import { EmployeeDetailModal } from './components/EmployeeDetailModal';
@@ -13,6 +14,9 @@ import { EditSalaryModal } from './components/EditSalaryModal';
 import { SalaryHistoryDrawer } from './components/SalaryHistoryDrawer';
 import { DocsModal } from './components/DocsModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
+import { LoginPage } from './components/LoginPage';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { apiFetch } from './lib/api';
 import {
   Employee,
   Department,
@@ -32,10 +36,13 @@ import {
   LayoutDashboard,
   Users,
   BarChart3,
-  Settings
+  Settings,
+  ShieldCheck,
+  Loader2
 } from 'lucide-react';
 
-export default function App() {
+function CompensationPortal() {
+  const { user, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -147,7 +154,7 @@ export default function App() {
   // Fetch metadata
   const fetchMeta = async () => {
     try {
-      const res = await fetch('/api/meta');
+      const res = await apiFetch('/api/meta');
       const data = await res.json();
       if (data.departments) setDepartments(data.departments);
       if (data.payBands) setPayBands(data.payBands);
@@ -161,8 +168,8 @@ export default function App() {
   const fetchDashboardData = async () => {
     try {
       const [statsRes, actRes] = await Promise.all([
-        fetch('/api/dashboard/stats'),
-        fetch('/api/activities')
+        apiFetch('/api/dashboard/stats'),
+        apiFetch('/api/activities')
       ]);
       const statsJson = await statsRes.json();
       const actJson = await actRes.json();
@@ -190,7 +197,7 @@ export default function App() {
       if (selectedBand) params.set('pay_band_id', selectedBand);
       if (selectedStatus && selectedStatus !== 'all') params.set('status', selectedStatus);
 
-      const res = await fetch(`/api/employees?${params.toString()}`);
+      const res = await apiFetch(`/api/employees?${params.toString()}`);
       const data = await res.json();
       setEmployeesData(data);
     } catch (err) {
@@ -254,7 +261,7 @@ export default function App() {
   // Open single employee detail with fresh data from server
   const handleOpenEmployeeDetail = async (emp: Employee) => {
     try {
-      const res = await fetch(`/api/employees/${emp.id}`);
+      const res = await apiFetch(`/api/employees/${emp.id}`);
       const detailed = await res.json();
       setSelectedEmployee(detailed || emp);
     } catch {
@@ -264,7 +271,7 @@ export default function App() {
 
   // Add Employee Handler
   const handleAddEmployee = async (newEmpData: any) => {
-    const res = await fetch('/api/employees', {
+    const res = await apiFetch('/api/employees', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newEmpData)
@@ -280,7 +287,7 @@ export default function App() {
 
   // Update Employee Profile
   const handleUpdateEmployee = async (id: number, data: any) => {
-    const res = await fetch(`/api/employees/${id}`, {
+    const res = await apiFetch(`/api/employees/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -308,7 +315,7 @@ export default function App() {
       changed_by?: string;
     }
   ) => {
-    const res = await fetch(`/api/employees/${id}/salary`, {
+    const res = await apiFetch(`/api/employees/${id}/salary`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -338,7 +345,7 @@ export default function App() {
     setIsReseeding(true);
     showToast(`Generating ${targetCount.toLocaleString()} employees with 69% IN / 31% US distribution...`);
     try {
-      const res = await fetch('/api/seed', {
+      const res = await apiFetch('/api/seed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ count: targetCount })
@@ -356,6 +363,26 @@ export default function App() {
   };
 
   const totalCount = employeesData?.pagination?.total || stats?.total_active_employees || 10000;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-100">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-12 w-12 rounded-xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400 animate-pulse">
+            <ShieldCheck className="w-6 h-6 text-blue-400" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+            <span className="text-sm font-medium text-slate-300">Authenticating ACME Security Session...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="flex min-h-screen bg-[#F8FAFC]">
@@ -431,7 +458,7 @@ export default function App() {
                   }}
                   onOpenEditSalary={async (empId) => {
                     try {
-                      const res = await fetch(`/api/employees/${empId}`);
+                      const res = await apiFetch(`/api/employees/${empId}`);
                       const emp = await res.json();
                       setSalaryChangeEmployee(emp);
                     } catch (err) {
@@ -486,6 +513,14 @@ export default function App() {
                 <SettingsView
                   onTriggerReseed={handleReseed}
                   isReseeding={isReseeding}
+                />
+              )}
+
+              {/* TAB 5: ABOUT & SYSTEM DOSSIER (Accessible via bottom sidebar) */}
+              {activeTab === 'about' && (
+                <AboutView
+                  onNavigateToTab={(tab) => setActiveTab(tab as TabType)}
+                  onReseed={handleReseed}
                 />
               )}
             </>
@@ -613,3 +648,12 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <CompensationPortal />
+    </AuthProvider>
+  );
+}
+

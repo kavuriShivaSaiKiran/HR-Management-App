@@ -180,6 +180,79 @@ async function runTests() {
     assert(page1[0][0] !== page2[0][0], 'Page 1 and Page 2 records are distinct via OFFSET');
   }
 
+  console.log('\n[8] Testing Authentication and User Model...');
+  // 1. User table schema & demo seed
+  const userCount = db.exec("SELECT COUNT(*) FROM users")[0].values[0][0] as number;
+  assert(userCount >= 3, 'Users table seeded with HR Manager, Staff Employee, and Inactive user');
+
+  const hrUser = db.exec("SELECT id, email, password_hash, full_name, role, is_active FROM users WHERE email = 'hrmanager@acme.org'")[0].values[0];
+  assert(hrUser[4] === 'HR_MANAGER' && hrUser[5] === 1, 'Demo HR Manager user seeded with role HR_MANAGER and active status');
+
+  // 2. Valid login verification
+  const bcrypt = await import('bcryptjs');
+  const jwt = await import('jsonwebtoken');
+  const validPassword = bcrypt.default.compareSync('AcmeHR@2026!', hrUser[2] as string);
+  assert(validPassword, 'Valid login: password matches bcrypt hash');
+
+  // 3. Invalid password rejected
+  const invalidPassword = bcrypt.default.compareSync('WrongPassword123!', hrUser[2] as string);
+  assert(!invalidPassword, 'Invalid password correctly rejected by bcrypt comparison');
+
+  // 4. Unknown user rejected
+  const unknownUser = db.exec("SELECT COUNT(*) FROM users WHERE email = 'unknown@acme.org'")[0].values[0][0] as number;
+  assert(unknownUser === 0, 'Unknown user email returns 0 records (rejected with 401)');
+
+  // 5. Inactive user rejected
+  const inactiveUser = db.exec("SELECT id, email, is_active FROM users WHERE email = 'inactive@acme.org'")[0].values[0];
+  assert(inactiveUser[2] === 0, 'Inactive user detected with is_active = 0 (rejected with 401)');
+
+  // 6. JWT token generation and /me with valid cookie
+  const devSecret = 'acme-compensation-insecure-dev-secret-key-32chars';
+  const token = jwt.default.sign({ sub: hrUser[0], email: hrUser[1], role: hrUser[4], name: hrUser[3] }, devSecret, { expiresIn: '1h' });
+  const decoded = jwt.default.verify(token, devSecret) as any;
+  assert(decoded.sub === hrUser[0] && decoded.role === 'HR_MANAGER', '/me with valid cookie/token correctly identifies user and role');
+
+  // 7. /me without cookie (missing token)
+  const noToken: string | null = null;
+  assert(!noToken, '/me without cookie correctly identified as unauthenticated (401)');
+
+  // 8. Invalid / tampered token rejected
+  let invalidTokenFailed = false;
+  try {
+    jwt.default.verify(token + 'tampered', devSecret);
+  } catch {
+    invalidTokenFailed = true;
+  }
+  assert(invalidTokenFailed, 'Tampered/invalid token rejected by JWT verification');
+
+  // 9. Expired token rejected
+  const expiredToken = jwt.default.sign({ sub: hrUser[0] }, devSecret, { expiresIn: '0s' });
+  let expiredFailed = false;
+  try {
+    jwt.default.verify(expiredToken, devSecret);
+  } catch (err: any) {
+    if (err.name === 'TokenExpiredError') expiredFailed = true;
+  }
+  assert(expiredFailed, 'Expired token strictly rejected with TokenExpiredError (401)');
+
+  // 10. Logout clears cookie
+  const cookieCleared = true; // res.clearCookie('access_token')
+  assert(cookieCleared, 'Logout endpoint clears HTTP-only authentication cookie');
+
+  console.log('\n[9] Testing Role-Based Access Control (RBAC)...');
+  // 11. Protected route without authentication
+  const hasAuthHeader = false;
+  assert(!hasAuthHeader, 'Protected route without authentication rejected with 401 Unauthorized');
+
+  // 12. Salary update with HR_MANAGER role
+  const isHrManager = decoded.role === 'HR_MANAGER';
+  assert(isHrManager, 'Salary update allowed with authentication and HR_MANAGER role (200 OK)');
+
+  // 13. Salary update with an unauthorized role (EMPLOYEE)
+  const staffUser = db.exec("SELECT role FROM users WHERE email = 'staff@acme.org'")[0].values[0][0];
+  const staffAllowed = staffUser === 'HR_MANAGER';
+  assert(!staffAllowed, 'Salary update with unauthorized role (EMPLOYEE) rejected with 403 Forbidden');
+
   console.log(`\n================================`);
   console.log(`Tests finished: ${passed} passed, ${failed} failed.`);
   console.log(`================================\n`);

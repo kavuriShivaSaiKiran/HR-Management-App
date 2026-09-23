@@ -16,6 +16,7 @@ import {
   Award
 } from 'lucide-react';
 import { Employee, SalaryRecord } from '../types';
+import { apiFetch } from '../lib/api';
 
 interface EmployeePortalViewProps {
   employee: Employee;
@@ -47,7 +48,7 @@ export const EmployeePortalView: React.FC<EmployeePortalViewProps> = ({
     const fetchHistory = async () => {
       setIsLoadingHistory(true);
       try {
-        const res = await fetch(`/api/employees/${employee.id}/history`);
+        const res = await apiFetch(`/api/employees/${employee.id}/history`);
         if (res.ok) {
           const data: SalaryRecord[] = await res.json();
           setHistory(data);

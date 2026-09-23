@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './server/routes/api';
 import { getDb } from './server/db/database';
@@ -10,6 +11,7 @@ async function startServer() {
 
   // Standard middleware
   app.use(express.json());
+  app.use(cookieParser());
 
   // Initialize DB asynchronously before listening
   try {

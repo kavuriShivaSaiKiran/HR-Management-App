@@ -1,6 +1,7 @@
 import initSqlJs, { Database } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 import { generateCountryAlignedName } from './countryNames';
 
 const DB_DIR = path.resolve(process.cwd(), 'data');
@@ -114,6 +115,19 @@ export function initializeSchema(db: Database): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      full_name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'HR_MANAGER',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_emp_dept ON employees(department_id);
     CREATE INDEX IF NOT EXISTS idx_emp_band ON employees(pay_band_id);
     CREATE INDEX IF NOT EXISTS idx_emp_country ON employees(country_code);
@@ -202,14 +216,47 @@ export function initializeSchema(db: Database): void {
     );
   }
 
-  // Check if employees exist and conform to 2-country demo (India 69%, US 31% with country-based wages)
-  const inCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code = 'IN'")[0]?.values[0][0] as number;
-  const usCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code = 'US'")[0]?.values[0][0] as number;
-  const total = (inCount || 0) + (usCount || 0);
-  const avgInSalary = inCount > 0 ? (db.exec("SELECT AVG(current_salary) FROM employees WHERE country_code = 'IN'")[0]?.values[0][0] as number) : 0;
+  // Seed default demo users if not present
+  try {
+    const userCheck = db.exec("SELECT COUNT(*) as c FROM users WHERE email = 'hrmanager@acme.org'")[0]?.values[0][0] as number;
+    if (!userCheck || userCheck === 0) {
+      const now = new Date().toISOString();
+      const hrHash = bcrypt.hashSync('AcmeHR@2026!', 10);
+      db.run(
+        `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['hrmanager@acme.org', hrHash, 'ACME HR Manager', 'HR_MANAGER', 1, now, now]
+      );
+
+      // Seed non-HR employee user for testing 403 authorization
+      const empHash = bcrypt.hashSync('Staff@2026!', 10);
+      db.run(
+        `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['staff@acme.org', empHash, 'Staff Member', 'EMPLOYEE', 1, now, now]
+      );
+
+      // Seed inactive user for testing 401 inactive validation
+      const inactiveHash = bcrypt.hashSync('Inactive@2026!', 10);
+      db.run(
+        `INSERT INTO users (email, password_hash, full_name, role, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['inactive@acme.org', inactiveHash, 'Inactive HR', 'HR_MANAGER', 0, now, now]
+      );
+    }
+  } catch (err) {
+    console.error('Error seeding users:', err);
+  }
+
+  // Check if employees exist and conform to realistic enterprise distributions
+  const inCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code = 'IN'")[0]?.values[0][0] as number || 0;
+  const usCount = db.exec("SELECT COUNT(*) FROM employees WHERE country_code = 'US'")[0]?.values[0][0] as number || 0;
+  const total = inCount + usCount;
+  const engCount = db.exec("SELECT COUNT(*) FROM employees WHERE department_id = (SELECT id FROM departments WHERE name = 'Engineering')")[0]?.values[0][0] as number || 0;
   
-  if (!total || total < 10000 || (inCount / total) < 0.65 || (inCount / total) > 0.73 || avgInSalary > 4000000) {
-    console.log(`Reseeding database with 2-country specification: 69% India & 31% US with country-based wages...`);
+  // Reseed if count < 10000 or if still using the old equal 16.7% synthetic department distribution (engCount < 3000)
+  if (!total || total < 10000 || engCount < 3000 || (inCount / total) < 0.64 || (inCount / total) > 0.74) {
+    console.log(`Reseeding database with realistic enterprise distribution (38% Engineering, 26% Operations, 16% Sales, 7% Finance, 7% Marketing, 6% HR)...`);
     seedEmployees(db, 10000, true);
   }
 
@@ -220,28 +267,58 @@ export function initializeSchema(db: Database): void {
 export function ensurePeriodSalaryData(db: Database): void {
   try {
     const countRes = db.exec("SELECT COUNT(*) FROM salary_records WHERE previous_salary > 0 AND effective_date >= '2025-10-01'")[0]?.values[0][0] as number || 0;
-    if (countRes >= 200) {
+    if (countRes >= 3000) {
       return;
     }
 
-    const empRes = db.exec("SELECT id, current_salary, currency_code, hire_date, country_code FROM employees WHERE employment_status = 'active' ORDER BY id ASC");
+    const empRes = db.exec("SELECT id, current_salary, currency_code, hire_date, country_code, department_id FROM employees WHERE employment_status = 'active' ORDER BY id ASC");
     if (!empRes.length || !empRes[0].values.length) return;
 
     const employees = empRes[0].values;
-    const reasons = ['Annual review', 'Merit cycle adjustment', 'Promotion', 'Market adjustment', 'Performance revision'];
-    const approvers = ['HR Manager', 'VP People', 'Comp Committee', 'Executive Dir'];
+    const approvers = ['HR Compensation Committee', 'VP People & Culture', 'Head of Total Rewards', 'Executive Review Board', 'Chief Financial Officer'];
 
-    // Review dates across Oct 2025 - Sep 2026
-    const reviewDates = [
-      '2025-10-15', '2025-11-01', '2025-11-20', '2025-12-10', // Q4 2025
-      '2026-01-15', '2026-01-28', '2026-02-14', '2026-03-01', '2026-03-15', // Q1 2026
-      '2026-04-01', '2026-04-15', '2026-05-10', '2026-06-01', '2026-06-15', // Q2 2026
-      '2026-07-01', '2026-07-15', '2026-08-01', '2026-08-15', '2026-09-01', '2026-09-15', '2026-09-21' // Q3 2026
+    // Weighted enterprise review schedule across Q4 2025 - Q3 2026:
+    // Q1 (Jan-Mar) is the primary annual review season (~45% volume), followed by Q2 promotions, Q3 parity, Q4 adjustments
+    const reviewSchedule = [
+      // Q4 2025 (~15% of annual cycle)
+      { date: '2025-10-15', cycle: 'Q4 2025 Merit Cycle', weight: 3 },
+      { date: '2025-11-01', cycle: 'Q4 2025 Off-Cycle Review', weight: 3 },
+      { date: '2025-11-15', cycle: 'Q4 2025 Promotion Round', weight: 3 },
+      { date: '2025-12-10', cycle: 'Q4 2025 Year-End Merit', weight: 4 },
+      // Q1 2026 (~45% of annual cycle - primary corporate review season)
+      { date: '2026-01-15', cycle: 'Q1 2026 Annual Compensation Review', weight: 10 },
+      { date: '2026-01-28', cycle: 'Q1 2026 Market Equity Adjustment', weight: 8 },
+      { date: '2026-02-14', cycle: 'Q1 2026 Mid-Cycle Promotion', weight: 8 },
+      { date: '2026-03-01', cycle: 'Q1 2026 Performance Review', weight: 10 },
+      { date: '2026-03-15', cycle: 'Q1 2026 Merit Adjustment', weight: 8 },
+      // Q2 2026 (~25% of annual cycle - spring promotions and parity)
+      { date: '2026-04-01', cycle: 'Q2 2026 Spring Review Cycle', weight: 6 },
+      { date: '2026-04-15', cycle: 'Q2 2026 Promotion Round', weight: 6 },
+      { date: '2026-05-10', cycle: 'Q2 2026 Market Parity Review', weight: 5 },
+      { date: '2026-06-01', cycle: 'Q2 2026 Mid-Year Compensation Review', weight: 5 },
+      { date: '2026-06-15', cycle: 'Q2 2026 Leadership Adjustment', weight: 4 },
+      // Q3 2026 (~15% of annual cycle)
+      { date: '2026-07-01', cycle: 'Q3 2026 Summer Review Cycle', weight: 4 },
+      { date: '2026-07-15', cycle: 'Q3 2026 Technical Ladder Promotion', weight: 4 },
+      { date: '2026-08-01', cycle: 'Q3 2026 Compensation Parity', weight: 3 },
+      { date: '2026-08-15', cycle: 'Q3 2026 Market Benchmark Adjustment', weight: 4 },
+      { date: '2026-09-01', cycle: 'Q3 2026 Fall Promotion Round', weight: 4 },
+      { date: '2026-09-15', cycle: 'Q3 2026 Annual Merit Cycle', weight: 5 },
+      { date: '2026-09-21', cycle: 'Q3 2026 Executive Review', weight: 3 }
     ];
+
+    // Build flattened weighted schedule
+    const schedulePool: typeof reviewSchedule = [];
+    for (const item of reviewSchedule) {
+      for (let w = 0; w < item.weight; w++) {
+        schedulePool.push(item);
+      }
+    }
 
     db.run("BEGIN TRANSACTION;");
 
-    const targetCount = Math.min(1400, Math.floor(employees.length * 0.20));
+    // Realistic annual review coverage: ~52% of total employees (approx 5,200 annual reviews)
+    const targetCount = Math.min(5250, Math.floor(employees.length * 0.525));
     for (let i = 0; i < targetCount; i++) {
       const emp = employees[i];
       const empId = emp[0] as number;
@@ -249,17 +326,39 @@ export function ensurePeriodSalaryData(db: Database): void {
       const currency = emp[2] as string;
       const hireDate = (emp[3] as string) || '2021-01-01';
 
-      const effDate = reviewDates[i % reviewDates.length];
+      const scheduleItem = schedulePool[i % schedulePool.length];
+      const effDate = scheduleItem.date;
       if (effDate < hireDate) continue;
 
-      const increasePct = 0.05 + ((i % 11) * 0.01); // 5% to 15%
+      // Realistic percentage adjustment based on review type:
+      // ~60% merit reviews (4% to 8%), ~20% promotions (10% to 18%), ~15% market adjustments (6% to 12%), ~5% performance revisions (5% to 10%)
+      const mod = i % 20;
+      let reason = 'Annual review';
+      let increasePct = 0.055; // 5.5% baseline merit
+
+      if (mod < 12) {
+        reason = 'Annual review';
+        increasePct = 0.038 + (i % 7) * 0.007; // 3.8% to 8.0%
+      } else if (mod < 16) {
+        reason = 'Promotion';
+        increasePct = 0.10 + (i % 5) * 0.018; // 10.0% to 17.2%
+      } else if (mod < 19) {
+        reason = 'Market adjustment';
+        increasePct = 0.065 + (i % 4) * 0.014; // 6.5% to 10.7%
+      } else {
+        reason = 'Performance revision';
+        increasePct = 0.05 + (i % 4) * 0.012; // 5.0% to 8.6%
+      }
+
+      // Calculate clean, realistic previous base salary
       const previousSalary = currency === 'INR'
         ? Math.round((currentSalary / (1 + increasePct)) / 10000) * 10000
         : Math.round((currentSalary / (1 + increasePct)) / 500) * 500;
 
-      const reason = reasons[i % reasons.length];
+      if (previousSalary >= currentSalary) continue;
+
       const changedBy = approvers[i % approvers.length];
-      const comment = `${reason} approved in FY26 compensation cycle`;
+      const comment = `${reason} approved in ${scheduleItem.cycle}`;
 
       db.run("UPDATE salary_records SET is_current = 0 WHERE employee_id = ?", [empId]);
 
@@ -267,7 +366,7 @@ export function ensurePeriodSalaryData(db: Database): void {
       db.run(`
         INSERT INTO salary_records (
           employee_id, base_salary, previous_salary, currency_code, effective_date, is_current, reason, comment, changed_by, created_at
-        ) VALUES (?, ?, ?, ?, ?, 0, 'Initial base', 'Previous compensation tier', ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, 0, 'Previous base compensation', 'Base compensation tier prior to review cycle', ?, ?)
       `, [empId, previousSalary, 0, currency, prevDate, changedBy, `${prevDate}T09:00:00Z`]);
 
       db.run(`
@@ -291,19 +390,183 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
     db.run("DELETE FROM employees;");
   }
 
-  // Multi-country angle: Exactly 2 countries (India ~69%, US ~31%)
-  const countryConfigs = [
-    { country: 'IN', currency: 'INR', rate: 0.012, weight: 0.69 },
-    { country: 'US', currency: 'USD', rate: 1.0, weight: 0.31 }
-  ];
-
-  const rolesByDept: Record<string, string[]> = {
-    'Engineering': ['Software Engineer', 'Frontend Engineer', 'Backend Engineer', 'DevOps Engineer', 'QA Automation Engineer', 'Engineering Manager'],
-    'Sales': ['Sales Executive', 'Account Executive', 'Business Development Rep', 'Sales Director', 'Customer Success Manager'],
-    'Finance': ['Financial Analyst', 'Senior Accountant', 'Payroll Specialist', 'Controller', 'Finance Manager'],
-    'Operations': ['Operations Analyst', 'Supply Chain Coordinator', 'Project Manager', 'Operations Director'],
-    'Human Resources': ['HR Specialist', 'Technical Recruiter', 'HR Business Partner', 'Compensation & Benefits Lead'],
-    'Marketing': ['Marketing Manager', 'Product Marketing Specialist', 'Content Strategist', 'Growth Marketer', 'Creative Director']
+  // Realistic Enterprise Department Proportions:
+  // - Engineering: 38% (3,800 staff) - Core software, data, cloud, architecture
+  // - Operations: 26% (2,600 staff) - 24/7 global delivery, client support, operations
+  // - Sales: 16% (1,600 staff) - Global commercial accounts, BDR, customer success
+  // - Finance: 7% (700 staff) - Corporate accounting, FP&A, treasury, payroll
+  // - Marketing: 7% (700 staff) - Product marketing, demand gen, brand, digital
+  // - Human Resources: 6% (600 staff) - Talent acquisition, people partners, comp & benefits
+  const departmentConfig: Record<string, {
+    share: number;
+    indiaRatio: number;
+    rolesByBand: {
+      L1: string[];
+      L2: string[];
+      L3: string[];
+      L4: string[];
+      L5: string[];
+    };
+    bandWeights: number[]; // L1, L2, L3, L4, L5
+    usSalaries: { min: number; max: number }[];
+    inSalaries: { min: number; max: number }[];
+  }> = {
+    'Engineering': {
+      share: 0.38,
+      indiaRatio: 0.70, // 70% India Tech Capability Center, 30% US HQ/Architecture
+      rolesByBand: {
+        L1: ['Associate Software Engineer', 'Junior QA Analyst', 'Associate Cloud Specialist'],
+        L2: ['Software Engineer', 'Frontend Engineer', 'QA Automation Engineer'],
+        L3: ['Senior Software Engineer', 'Fullstack Engineer', 'DevOps Engineer', 'Backend Engineer'],
+        L4: ['Lead Software Engineer', 'Staff Software Engineer', 'Engineering Manager', 'Cloud Architect'],
+        L5: ['Principal Architect', 'Director of Engineering', 'Distinguished Engineer']
+      },
+      bandWeights: [0.12, 0.28, 0.35, 0.18, 0.07],
+      usSalaries: [
+        { min: 66000, max: 82000 },    // L1 (avg $74k)
+        { min: 88000, max: 122000 },   // L2 (avg $105k)
+        { min: 126000, max: 168000 },  // L3 (avg $147k)
+        { min: 172000, max: 228000 },  // L4 (avg $200k)
+        { min: 230000, max: 310000 },  // L5 (avg $270k)
+      ],
+      inSalaries: [
+        { min: 650000, max: 1050000 },   // L1 (avg ₹850k ≈ $10.2k)
+        { min: 110000, max: 1900000 },   // L2 (avg ₹1.5M ≈ $18k)
+        { min: 2000000, max: 3400000 },  // L3 (avg ₹2.7M ≈ $32.4k)
+        { min: 3600000, max: 5600000 },  // L4 (avg ₹4.6M ≈ $55.2k)
+        { min: 5800000, max: 9500000 },  // L5 (avg ₹7.5M ≈ $90k)
+      ]
+    },
+    'Sales': {
+      share: 0.16,
+      indiaRatio: 0.45, // 55% US client markets, 45% India inside sales & accounts
+      rolesByBand: {
+        L1: ['Sales Development Rep', 'Business Development Associate'],
+        L2: ['Inside Sales Rep', 'Account Specialist', 'Sales Operations Analyst'],
+        L3: ['Account Executive', 'Customer Success Manager', 'Regional Sales Specialist'],
+        L4: ['Senior Account Executive', 'Enterprise Account Executive', 'Sales Manager'],
+        L5: ['Sales Director', 'VP Commercial Sales']
+      },
+      bandWeights: [0.18, 0.32, 0.30, 0.15, 0.05],
+      usSalaries: [
+        { min: 56000, max: 72000 },    // L1 (avg $64k)
+        { min: 74000, max: 105000 },   // L2 (avg $89k)
+        { min: 108000, max: 152000 },  // L3 (avg $130k)
+        { min: 156000, max: 215000 },  // L4 (avg $185k)
+        { min: 215000, max: 295000 },  // L5 (avg $255k)
+      ],
+      inSalaries: [
+        { min: 520000, max: 840000 },    // L1 (avg ₹680k ≈ $8.2k)
+        { min: 880000, max: 1500000 },   // L2 (avg ₹1.2M ≈ $14.4k)
+        { min: 1600000, max: 2700000 },  // L3 (avg ₹2.15M ≈ $25.8k)
+        { min: 2800000, max: 4400000 },  // L4 (avg ₹3.6M ≈ $43.2k)
+        { min: 4600000, max: 7400000 },  // L5 (avg ₹6.0M ≈ $72k)
+      ]
+    },
+    'Operations': {
+      share: 0.26,
+      indiaRatio: 0.80, // 80% India global operations & delivery center, 20% US
+      rolesByBand: {
+        L1: ['Operations Associate', 'Customer Support Associate', 'Data Operations Specialist'],
+        L2: ['Customer Support Specialist', 'Operations Analyst', 'Logistics Coordinator'],
+        L3: ['Senior Operations Analyst', 'Service Delivery Lead', 'Project Coordinator'],
+        L4: ['Operations Project Manager', 'Supply Chain Manager', 'Service Delivery Manager'],
+        L5: ['Director of Global Operations', 'Head of Service Delivery']
+      },
+      bandWeights: [0.30, 0.40, 0.20, 0.08, 0.02],
+      usSalaries: [
+        { min: 48000, max: 62000 },    // L1 (avg $55k)
+        { min: 64000, max: 84000 },    // L2 (avg $74k)
+        { min: 86000, max: 118000 },   // L3 (avg $102k)
+        { min: 120000, max: 158000 },  // L4 (avg $139k)
+        { min: 165000, max: 225000 },  // L5 (avg $195k)
+      ],
+      inSalaries: [
+        { min: 420000, max: 680000 },    // L1 (avg ₹550k ≈ $6.6k)
+        { min: 700000, max: 1150000 },   // L2 (avg ₹920k ≈ $11.0k)
+        { min: 1200000, max: 1950000 },  // L3 (avg ₹1.58M ≈ $19.0k)
+        { min: 2050000, max: 3250000 },  // L4 (avg ₹2.65M ≈ $31.8k)
+        { min: 3400000, max: 5400000 },  // L5 (avg ₹4.3M ≈ $51.6k)
+      ]
+    },
+    'Finance': {
+      share: 0.07,
+      indiaRatio: 0.65, // 65% India shared services, 35% US controllership & FP&A
+      rolesByBand: {
+        L1: ['Junior Accountant', 'Billing Specialist'],
+        L2: ['Staff Accountant', 'Financial Analyst', 'Payroll Operations Specialist'],
+        L3: ['Senior Financial Analyst', 'Senior Accountant', 'Corporate Treasury Analyst'],
+        L4: ['FP&A Manager', 'Senior Tax Manager', 'Assistant Controller'],
+        L5: ['Corporate Controller', 'Director of Finance']
+      },
+      bandWeights: [0.15, 0.35, 0.30, 0.15, 0.05],
+      usSalaries: [
+        { min: 55000, max: 70000 },    // L1 (avg $62k)
+        { min: 72000, max: 96000 },    // L2 (avg $84k)
+        { min: 100000, max: 138000 },  // L3 (avg $119k)
+        { min: 142000, max: 188000 },  // L4 (avg $165k)
+        { min: 195000, max: 270000 },  // L5 (avg $230k)
+      ],
+      inSalaries: [
+        { min: 500000, max: 800000 },    // L1 (avg ₹650k ≈ $7.8k)
+        { min: 820000, max: 1400000 },   // L2 (avg ₹1.1M ≈ $13.2k)
+        { min: 1480000, max: 2500000 },  // L3 (avg ₹1.98M ≈ $23.8k)
+        { min: 2650000, max: 4200000 },  // L4 (avg ₹3.4M ≈ $40.8k)
+        { min: 4400000, max: 7000000 },  // L5 (avg ₹5.6M ≈ $67.2k)
+      ]
+    },
+    'Marketing': {
+      share: 0.07,
+      indiaRatio: 0.50, // 50% US, 50% India
+      rolesByBand: {
+        L1: ['Marketing Coordinator', 'Social Media Associate'],
+        L2: ['Digital Marketing Specialist', 'Content Creator', 'Event Specialist'],
+        L3: ['Product Marketing Manager', 'Content Strategist', 'Growth Marketing Specialist'],
+        L4: ['Senior Product Marketing Manager', 'Growth Marketing Lead', 'Creative Lead'],
+        L5: ['VP Marketing', 'Global Brand Director']
+      },
+      bandWeights: [0.18, 0.34, 0.30, 0.14, 0.04],
+      usSalaries: [
+        { min: 52000, max: 68000 },    // L1 (avg $60k)
+        { min: 70000, max: 94000 },    // L2 (avg $82k)
+        { min: 98000, max: 134000 },   // L3 (avg $116k)
+        { min: 138000, max: 182000 },  // L4 (avg $160k)
+        { min: 185000, max: 255000 },  // L5 (avg $220k)
+      ],
+      inSalaries: [
+        { min: 480000, max: 760000 },    // L1 (avg ₹620k ≈ $7.4k)
+        { min: 780000, max: 1340000 },   // L2 (avg ₹1.05M ≈ $12.6k)
+        { min: 1420000, max: 2400000 },  // L3 (avg ₹1.88M ≈ $22.6k)
+        { min: 2500000, max: 3900000 },  // L4 (avg ₹3.15M ≈ $37.8k)
+        { min: 4100000, max: 6600000 },  // L5 (avg ₹5.25M ≈ $63.0k)
+      ]
+    },
+    'Human Resources': {
+      share: 0.06,
+      indiaRatio: 0.70, // 70% India, 30% US
+      rolesByBand: {
+        L1: ['HR Coordinator', 'Recruiting Coordinator'],
+        L2: ['Talent Acquisition Specialist', 'HR Generalist', 'People Operations Analyst'],
+        L3: ['Technical Recruiter', 'Senior HR Generalist', 'Comp & Benefits Analyst'],
+        L4: ['Senior HR Business Partner', 'Compensation & Benefits Lead', 'Talent Acquisition Lead'],
+        L5: ['VP People & Culture', 'Head of Human Resources']
+      },
+      bandWeights: [0.20, 0.35, 0.28, 0.13, 0.04],
+      usSalaries: [
+        { min: 52000, max: 68000 },    // L1 (avg $60k)
+        { min: 70000, max: 94000 },    // L2 (avg $82k)
+        { min: 96000, max: 132000 },   // L3 (avg $114k)
+        { min: 136000, max: 178000 },  // L4 (avg $157k)
+        { min: 182000, max: 250000 },  // L5 (avg $215k)
+      ],
+      inSalaries: [
+        { min: 460000, max: 740000 },    // L1 (avg ₹600k ≈ $7.2k)
+        { min: 760000, max: 1300000 },   // L2 (avg ₹1.02M ≈ $12.2k)
+        { min: 1350000, max: 2300000 },  // L3 (avg ₹1.8M ≈ $21.6k)
+        { min: 2400000, max: 3750000 },  // L4 (avg ₹3.05M ≈ $36.6k)
+        { min: 3900000, max: 6400000 },  // L5 (avg ₹5.1M ≈ $61.2k)
+      ]
+    }
   };
 
   const departmentsRes = db.exec("SELECT id, name FROM departments");
@@ -321,7 +584,6 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
   const maxCodeRes = db.exec("SELECT MAX(id) FROM employees")[0]?.values[0][0];
   let startId = typeof maxCodeRes === 'number' ? maxCodeRes + 1 : 1;
 
-  // Insert in chunks with transaction for maximum speed
   db.run("BEGIN TRANSACTION;");
 
   const empStmt = db.prepare(`
@@ -346,12 +608,11 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       last: 'Johnson',
       email: 'emma.johnson@demo.com',
       deptName: 'Marketing',
-      role: 'Marketing Manager',
+      role: 'Senior Product Marketing Manager',
       country: 'US',
       currency: 'USD',
-      rate: 1.0,
-      bandIdx: 3,
-      salary: 108000,
+      bandIdx: 3, // L4
+      salary: 154000,
       status: 'active',
       hireDate: '2021-03-15'
     },
@@ -361,12 +622,11 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       last: 'Sharma',
       email: 'employee@demo.com', // Demo employee login persona
       deptName: 'Engineering',
-      role: 'Software Engineer',
+      role: 'Senior Software Engineer',
       country: 'IN',
       currency: 'INR',
-      rate: 0.012,
-      bandIdx: 2,
-      salary: 2800000, // ~33,600 USD (or competitive INR tech salary)
+      bandIdx: 2, // L3
+      salary: 2600000, // ~31,200 USD
       status: 'active',
       hireDate: '2022-06-10'
     },
@@ -379,9 +639,8 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       role: 'Engineering Manager',
       country: 'US',
       currency: 'USD',
-      rate: 1.0,
-      bandIdx: 4,
-      salary: 165000,
+      bandIdx: 3, // L4
+      salary: 195000,
       status: 'active',
       hireDate: '2020-09-01'
     },
@@ -391,12 +650,11 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       last: 'Patel',
       email: 'priya.patel@demo.com',
       deptName: 'Finance',
-      role: 'Financial Analyst',
+      role: 'Staff Accountant',
       country: 'IN',
       currency: 'INR',
-      rate: 0.012,
-      bandIdx: 0,
-      salary: 720000,
+      bandIdx: 1, // L2
+      salary: 1100000, // ~13,200 USD
       status: 'active',
       hireDate: '2023-01-20'
     },
@@ -409,9 +667,8 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       role: 'Compensation & Benefits Lead',
       country: 'US',
       currency: 'USD',
-      rate: 1.0,
-      bandIdx: 3,
-      salary: 115000,
+      bandIdx: 3, // L4
+      salary: 152000,
       status: 'active',
       hireDate: '2022-04-12'
     },
@@ -424,9 +681,8 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       role: 'Backend Engineer',
       country: 'IN',
       currency: 'INR',
-      rate: 0.012,
-      bandIdx: 2,
-      salary: 2400000,
+      bandIdx: 2, // L3
+      salary: 2400000, // ~28,800 USD
       status: 'active',
       hireDate: '2023-02-15'
     },
@@ -435,13 +691,12 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       first: 'David',
       last: 'Wilson',
       email: 'david.wilson@demo.com',
-      deptName: 'Operations',
+      deptName: 'Engineering',
       role: 'DevOps Engineer',
       country: 'US',
       currency: 'USD',
-      rate: 1.0,
-      bandIdx: 3,
-      salary: 128000,
+      bandIdx: 2, // L3
+      salary: 145000,
       status: 'active',
       hireDate: '2021-11-01'
     },
@@ -454,9 +709,8 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       role: 'Frontend Engineer',
       country: 'IN',
       currency: 'INR',
-      rate: 0.012,
-      bandIdx: 2,
-      salary: 2100000,
+      bandIdx: 1, // L2
+      salary: 1500000, // ~18,000 USD
       status: 'active',
       hireDate: '2022-08-15'
     },
@@ -466,12 +720,11 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       last: 'Taylor',
       email: 'jessica.taylor@demo.com',
       deptName: 'Finance',
-      role: 'Controller',
+      role: 'Corporate Controller',
       country: 'US',
       currency: 'USD',
-      rate: 1.0,
-      bandIdx: 4,
-      salary: 142000,
+      bandIdx: 4, // L5
+      salary: 235000,
       status: 'active',
       hireDate: '2019-05-10'
     },
@@ -481,12 +734,11 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       last: 'Malhotra',
       email: 'vikram.malhotra@demo.com',
       deptName: 'Operations',
-      role: 'Operations Director',
+      role: 'Director of Global Operations',
       country: 'IN',
       currency: 'INR',
-      rate: 0.012,
-      bandIdx: 4,
-      salary: 3400000,
+      bandIdx: 4, // L5
+      salary: 4800000, // ~57,600 USD
       status: 'active',
       hireDate: '2020-07-01'
     }
@@ -494,7 +746,6 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
 
   const now = new Date().toISOString();
 
-  // If this is starting from scratch, insert showcase employees first
   let countToGenerate = count;
   if (startId === 1) {
     for (let idx = 0; idx < showcaseEmployees.length; idx++) {
@@ -519,101 +770,96 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
         now,
         now
       ]);
-      
-      // Add a past salary record then current salary record to show history!
+
       salStmt.run([
         scId,
-        Math.round(sc.salary * 0.9),
-        Math.round(sc.salary * 0.8),
+        Math.round(sc.salary * 0.92),
+        Math.round(sc.salary * 0.84),
         sc.currency,
         sc.hireDate,
         0,
-        'Annual review',
-        'Initial merit compensation review',
-        'HR Manager',
+        'Initial base',
+        'Initial offer compensation',
+        'HR Compensation Committee',
         `${sc.hireDate}T10:00:00Z`
       ]);
       salStmt.run([
         scId,
         sc.salary,
-        Math.round(sc.salary * 0.9),
+        Math.round(sc.salary * 0.92),
         sc.currency,
-        '2026-09-21',
+        '2026-09-15',
         1,
         sc.code === 'EMP-00002' ? 'Promotion' : (sc.code === 'EMP-00003' ? 'Market adjustment' : 'Annual review'),
-        sc.code === 'EMP-00002' ? 'Promoted to Senior Software Engineer' : 'Compensation adjustment',
-        'HR Manager',
-        '2026-09-21T14:30:00Z'
+        sc.code === 'EMP-00002' ? 'Promoted to Senior Software Engineer' : 'Approved in FY26 compensation cycle',
+        'HR Compensation Committee',
+        '2026-09-15T14:30:00Z'
       ]);
     }
     countToGenerate -= showcaseEmployees.length;
     startId += showcaseEmployees.length;
   }
 
-  // Country-grounded pay bands:
-  // India (INR): authentic Indian corporate/tech compensation scale
-  // US (USD): authentic US corporate/tech compensation scale
-  const inBands = [
-    { min: 450000, max: 750000 },     // L1 - Associate (avg ₹600k)
-    { min: 750000, max: 1350000 },    // L2 - Junior (avg ₹1.05M)
-    { min: 1350000, max: 2400000 },   // L3 - Mid-Level (avg ₹1.85M)
-    { min: 2400000, max: 4000000 },   // L4 - Senior (avg ₹3.2M)
-    { min: 4000000, max: 6800000 },   // L5 - Lead / Principal (avg ₹5.2M)
-  ];
+  // Pre-calculate cumulative department thresholds
+  const deptEntries = Object.entries(departmentConfig);
+  const deptCumulative: { name: string; threshold: number; conf: typeof departmentConfig[string] }[] = [];
+  let cum = 0;
+  for (const [dName, conf] of deptEntries) {
+    cum += conf.share;
+    deptCumulative.push({ name: dName, threshold: cum, conf });
+  }
 
-  const usBands = [
-    { min: 48000, max: 68000 },       // L1 - Associate (avg $58k)
-    { min: 68000, max: 98000 },       // L2 - Junior (avg $83k)
-    { min: 98000, max: 142000 },      // L3 - Mid-Level (avg $120k)
-    { min: 140000, max: 195000 },     // L4 - Senior (avg $167k)
-    { min: 195000, max: 275000 },     // L5 - Lead / Principal (avg $235k)
-  ];
-
-  // Generate remaining employees up to count: exactly 69% India and 31% US
   for (let i = 0; i < countToGenerate; i++) {
     const currentId = startId + i;
     const empCode = `EMP-${currentId.toString().padStart(5, '0')}`;
 
-    // 69% India, 31% US
-    const isIndia = Math.random() < 0.69;
-    const cConf = isIndia ? countryConfigs[0] : countryConfigs[1];
+    // Select department according to realistic corporate distribution
+    const deptRand = Math.random();
+    const selectedDeptEntry = deptCumulative.find(d => deptRand <= d.threshold) || deptCumulative[0];
+    const deptObj = deptList.find(d => d.name === selectedDeptEntry.name) || deptList[0];
+    const dConf = selectedDeptEntry.conf;
 
-    // Generate authentic, localized names strictly aligned with employee country
-    const { firstName, lastName, email } = generateCountryAlignedName(cConf.country, currentId);
-    
-    // Distribute across departments
-    const dept = deptList[i % deptList.length];
-    const roles = rolesByDept[dept.name] || ['Specialist', 'Manager', 'Coordinator'];
-    const roleTitle = roles[Math.floor(Math.random() * roles.length)];
-    
-    // Distribute across pay bands with realistic variance
-    // L1: 25%, L2: 30%, L3: 25%, L4: 15%, L5: 5%
-    const rand = Math.random();
+    // Determine country according to department operational hub split
+    const isIndia = Math.random() < dConf.indiaRatio;
+    const countryCode = isIndia ? 'IN' : 'US';
+    const currencyCode = isIndia ? 'INR' : 'USD';
+
+    // Generate authentic, localized names aligned with employee country
+    const { firstName, lastName, email } = generateCountryAlignedName(countryCode, currentId);
+
+    // Select pay band according to department-specific seniority distribution
+    const bandRand = Math.random();
+    let bCum = 0;
     let bandIdx = 0;
-    if (rand < 0.25) bandIdx = 0;
-    else if (rand < 0.55) bandIdx = 1;
-    else if (rand < 0.80) bandIdx = 2;
-    else if (rand < 0.95) bandIdx = 3;
-    else bandIdx = 4;
-
+    for (let b = 0; b < dConf.bandWeights.length; b++) {
+      bCum += dConf.bandWeights[b];
+      if (bandRand <= bCum) {
+        bandIdx = b;
+        break;
+      }
+    }
     const band = bandList[bandIdx] || bandList[1];
 
-    // Status: active
-    const status = 'active';
-    
-    // Hire date between 2018 and 2024
-    const hireYear = 2018 + Math.floor(Math.random() * 6);
-    const hireMonth = (1 + Math.floor(Math.random() * 12)).toString().padStart(2, '0');
-    const hireDay = (1 + Math.floor(Math.random() * 28)).toString().padStart(2, '0');
-    const hireDate = `${hireYear}-${hireMonth}-${hireDay}`;
+    // Select role title aligned with level
+    const bandKey = (`L${bandIdx + 1}`) as 'L1' | 'L2' | 'L3' | 'L4' | 'L5';
+    const possibleRoles = dConf.rolesByBand[bandKey] || ['Specialist', 'Lead'];
+    const roleTitle = possibleRoles[Math.floor(Math.random() * possibleRoles.length)];
 
-    // Calculate base salary directly in country currency based on country-grounded wage scale
-    const targetBand = isIndia ? inBands[bandIdx] : usBands[bandIdx];
-    const bandSpread = targetBand.max - targetBand.min;
-    const rawSalary = targetBand.min + Math.random() * bandSpread;
+    // Calculate base salary in country currency using authentic department-specific wage bands
+    const salRange = isIndia ? dConf.inSalaries[bandIdx] : dConf.usSalaries[bandIdx];
+    const rawSalary = salRange.min + Math.random() * (salRange.max - salRange.min);
     const localSalary = isIndia
       ? Math.round(rawSalary / 10000) * 10000
       : Math.round(rawSalary / 500) * 500;
+
+    // Status: active
+    const status = 'active';
+
+    // Hire date between 2019 and 2024
+    const hireYear = 2019 + Math.floor(Math.random() * 6);
+    const hireMonth = (1 + Math.floor(Math.random() * 12)).toString().padStart(2, '0');
+    const hireDay = (1 + Math.floor(Math.random() * 28)).toString().padStart(2, '0');
+    const hireDate = `${hireYear}-${hireMonth}-${hireDay}`;
 
     empStmt.run([
       currentId,
@@ -621,10 +867,10 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       firstName,
       lastName,
       email,
-      dept.id,
+      deptObj.id,
       roleTitle,
-      cConf.country,
-      cConf.currency,
+      countryCode,
+      currencyCode,
       band.id,
       localSalary,
       status,
@@ -633,17 +879,22 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
       now
     ]);
 
-    // Past salary history
-    const hasHistory = Math.random() < 0.4 && hireYear <= 2022;
+    // Baseline historical records
+    const hasHistory = Math.random() < 0.40 && hireYear <= 2023;
     if (hasHistory) {
-      const pastSalary = Math.round(localSalary * (0.88 + Math.random() * 0.05));
-      const previousBase = Math.round(pastSalary * 0.9);
-      const reasons = ['Annual review', 'Promotion', 'Market adjustment', 'Role change'];
+      const pastSalary = isIndia
+        ? Math.round((localSalary * 0.92) / 10000) * 10000
+        : Math.round((localSalary * 0.92) / 500) * 500;
+      const prevBase = isIndia
+        ? Math.round((pastSalary * 0.92) / 10000) * 10000
+        : Math.round((pastSalary * 0.92) / 500) * 500;
+      const reasons = ['Annual review', 'Promotion', 'Market adjustment', 'Performance revision'];
       const r = reasons[Math.floor(Math.random() * reasons.length)];
-      salStmt.run([currentId, pastSalary, previousBase, cConf.currency, hireDate, 0, 'Annual review', 'Initial compensation review', 'HR Manager', `${hireDate}T10:00:00Z`]);
-      salStmt.run([currentId, localSalary, pastSalary, cConf.currency, `${hireYear + 1}-04-01`, 1, r, 'Merit cycle adjustment', 'HR Manager', `${hireYear + 1}-04-01T10:00:00Z`]);
+
+      salStmt.run([currentId, pastSalary, prevBase, currencyCode, hireDate, 0, 'Annual review', 'Initial merit compensation review', 'HR Compensation Committee', `${hireDate}T10:00:00Z`]);
+      salStmt.run([currentId, localSalary, pastSalary, currencyCode, `${hireYear + 1}-04-01`, 1, r, 'Approved merit adjustment', 'HR Compensation Committee', `${hireYear + 1}-04-01T10:00:00Z`]);
     } else {
-      salStmt.run([currentId, localSalary, 0, cConf.currency, hireDate, 1, 'Initial compensation', 'Onboarding offer', 'HR Manager', `${hireDate}T10:00:00Z`]);
+      salStmt.run([currentId, localSalary, 0, currencyCode, hireDate, 1, 'Initial compensation', 'Onboarding offer', 'HR Compensation Committee', `${hireDate}T10:00:00Z`]);
     }
   }
 
@@ -653,3 +904,4 @@ export function seedEmployees(db: Database, count: number = 10000, clearExisting
   db.run("COMMIT;");
   saveDatabase(db);
 }
+

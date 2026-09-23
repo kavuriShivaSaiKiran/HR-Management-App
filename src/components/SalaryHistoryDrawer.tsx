@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Employee, SalaryRecord } from '../types';
 import { cn } from '../lib/utils';
+import { apiFetch } from '../lib/api';
 
 interface SalaryHistoryDrawerProps {
   isOpen: boolean;
@@ -49,7 +50,7 @@ export const SalaryHistoryDrawer: React.FC<SalaryHistoryDrawerProps> = ({
       setIsLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/employees/${employee.id}/history`);
+        const res = await apiFetch(`/api/employees/${employee.id}/history`);
         if (!res.ok) throw new Error('Failed to load salary history');
         const data: SalaryRecord[] = await res.json();
         setHistory(data);

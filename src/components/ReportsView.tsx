@@ -38,7 +38,9 @@ import {
   FileCheck2,
   Clock,
   Calendar,
-  FileText
+  FileText,
+  Award,
+  Loader2
 } from 'lucide-react';
 import {
   CompensationInsightsResponse,
@@ -52,6 +54,7 @@ import {
 import { cn } from '../lib/utils';
 import { formatAsOfDate, loadStoredPeriod, DEFAULT_AS_OF_DATE } from '../lib/periodUtils';
 import { AnalysisPeriodFilter } from './AnalysisPeriodFilter';
+import { apiFetch } from '../lib/api';
 
 interface ReportsViewProps {
   analysisPeriod?: AnalysisPeriodState;
@@ -96,7 +99,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       if (periodState.endDate) params.append('end_date', periodState.endDate);
       if (periodState.asOfDate) params.append('as_of_date', periodState.asOfDate);
 
-      const res = await fetch(`/api/insights?${params.toString()}`);
+      const res = await apiFetch(`/api/insights?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const data: CompensationInsightsResponse = await res.json();
       setInsights(data);
@@ -111,7 +114,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const fetchQuestionAnswer = async (id: string, threshold: number = salaryThreshold) => {
     setIsAnswering(true);
     try {
-      const res = await fetch(`/api/insights/question?id=${id}&threshold=${threshold}`);
+      const res = await apiFetch(`/api/insights/question?id=${id}&threshold=${threshold}`);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const data: PredefinedQuestionAnswer = await res.json();
       setActiveAnswer(data);
@@ -446,6 +449,139 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
+      {/* Loading Skeletons when Insights data is not yet loaded */}
+      {isLoading && !insights && activeSection !== 'assistant' && (
+        <div className="space-y-6">
+          {/* Top Loading Banner */}
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-blue-50/90 border border-blue-200/80 text-blue-700 text-xs font-semibold animate-pulse shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-600 shrink-0" />
+              <span>Loading Compensation Intelligence Reports & Period Activity...</span>
+            </div>
+            <span className="text-[11px] font-mono text-blue-600 hidden sm:inline">Evaluating workforce metrics...</span>
+          </div>
+
+          {/* Current-State Metrics Skeleton (6 cards) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Current-State Metrics
+                </span>
+                <span className="h-5 w-24 bg-slate-200 rounded-md animate-pulse" />
+              </div>
+              <span className="h-3 w-32 bg-slate-100 rounded animate-pulse hidden sm:inline" />
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {[
+                { title: 'Current Headcount' },
+                { title: 'Total Annual Comp' },
+                { title: 'Current Avg Salary' },
+                { title: 'Current Median Salary' },
+                { title: 'Highest Salary' },
+                { title: 'Lowest Base Floor' }
+              ].map((card, idx) => (
+                <div key={idx} className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-2 animate-pulse">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">
+                    {card.title}
+                  </span>
+                  <div className="h-6 w-20 bg-slate-200 rounded animate-pulse mt-1" />
+                  <div className="h-3 w-16 bg-slate-100 rounded animate-pulse" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Period-Controlled Activity Skeletons (4 cards) */}
+          <div className="bg-slate-50/70 border border-blue-200/70 rounded-2xl p-4 sm:p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-blue-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-blue-500 animate-pulse" />
+                <span className="h-4 w-44 bg-slate-200 rounded animate-pulse" />
+                <span className="h-4 w-28 bg-blue-100 rounded-full animate-pulse" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {[
+                { title: 'Salary Changes in Period', icon: Clock },
+                { title: 'Total Annualized Increase', icon: DollarSign },
+                { title: 'Average % Adjustment', icon: TrendingUp },
+                { title: 'Adjustments by Type', icon: FileCheck2 }
+              ].map((m, i) => (
+                <div key={i} className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3 animate-pulse">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{m.title}</span>
+                    <m.icon className="w-4 h-4 text-slate-300" />
+                  </div>
+                  <div className="h-7 w-24 bg-slate-200 rounded" />
+                  <div className="h-3 w-32 bg-slate-100 rounded" />
+                </div>
+              ))}
+            </div>
+
+            {/* Charts Skeleton */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+              <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3 animate-pulse">
+                <div className="flex items-center justify-between">
+                  <div className="h-4 w-40 bg-slate-200 rounded" />
+                  <div className="h-5 w-20 bg-blue-50 rounded-lg" />
+                </div>
+                <div className="h-56 w-full bg-slate-50/70 rounded-xl flex items-center justify-center border border-dashed border-slate-200">
+                  <div className="flex flex-col items-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+                    <span className="text-xs font-medium">Plotting compensation trajectory...</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3 animate-pulse">
+                <div className="flex items-center justify-between">
+                  <div className="h-4 w-40 bg-slate-200 rounded" />
+                  <div className="h-5 w-24 bg-emerald-50 rounded-lg" />
+                </div>
+                <div className="h-56 w-full bg-slate-50/70 rounded-xl flex items-center justify-center border border-dashed border-slate-200">
+                  <div className="flex flex-col items-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+                    <span className="text-xs font-medium">Aggregating adjustment volumes...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Department Compensation Insights Table Skeleton */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4 animate-pulse">
+            <div className="flex items-center justify-between">
+              <div className="h-5 w-48 bg-slate-200 rounded" />
+              <div className="h-5 w-24 bg-slate-100 rounded" />
+            </div>
+            <div className="space-y-2.5">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="h-10 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between px-3">
+                  <div className="h-4 w-32 bg-slate-200 rounded" />
+                  <div className="h-4 w-20 bg-slate-200 rounded" />
+                  <div className="h-4 w-24 bg-slate-200 rounded" />
+                  <div className="h-4 w-16 bg-slate-100 rounded" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active Updating Banner when refreshing with existing data */}
+      {isLoading && insights && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-blue-50/80 border border-blue-200/80 text-blue-700 text-xs font-semibold animate-pulse shadow-xs">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-blue-600 shrink-0" />
+            <span>Updating compensation analytics & reports for {periodState.label}...</span>
+          </div>
+          <span className="text-[11px] font-mono text-blue-600 hidden sm:inline">Syncing...</span>
+        </div>
+      )}
+
       {/* 2. CURRENT-STATE EXECUTIVE METRICS (Labeled As of [date]) */}
       {insights && (activeSection === 'all' || activeSection === 'period') && (
         <div className="space-y-3">
@@ -457,6 +593,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
                 As of {formattedAsOf}
               </span>
+              {isLoading && (
+                <span className="flex items-center gap-1 text-[11px] text-blue-600 font-medium">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Updating...
+                </span>
+              )}
             </div>
             <span className="text-[11px] text-slate-400">
               Point-in-time organizational snapshot
@@ -552,6 +694,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase rounded-full bg-blue-100 text-blue-700">
                   {period.is_snapshot ? 'Real-Time Snapshot' : `${period.start_date} → ${period.end_date}`}
                 </span>
+                {isLoading && (
+                  <span className="flex items-center gap-1 text-xs text-blue-600 font-semibold">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Calculating...
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 {period.is_snapshot
@@ -688,106 +836,182 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          {/* Period-Controlled Compensation Trend Chart */}
-          <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <span>Compensation Trend Curve ({period.period_label})</span>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
-                    Controlled by Analysis Period
-                  </span>
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Tracking monthly payroll and modification volume across {period.period_label}
-                </p>
-              </div>
+          {/* Two Separate Charts: Monthly Compensation Trend & Salary Adjustment Volume */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Chart 1: Monthly Compensation Trend */}
+            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3">
+              {(() => {
+                const trendData = (period.trend_points || []).map((pt) => ({
+                  label: pt.date_label,
+                  payroll_m: Number((pt.payroll_usd / 1000000).toFixed(3)),
+                  increase_k: Math.round(pt.total_increase_usd / 1000)
+                }));
+                const firstPayroll = trendData[0]?.payroll_m || 0;
+                const lastPayroll = trendData[trendData.length - 1]?.payroll_m || 0;
+                const totalChangeM = Number((lastPayroll - firstPayroll).toFixed(3));
+                const totalChangePct = firstPayroll > 0 ? Number(((totalChangeM / firstPayroll) * 100).toFixed(2)) : 0;
 
-              <div className="flex items-center gap-3 text-xs font-semibold text-slate-600">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-blue-600" />
-                  <span>Monthly Payroll ($M)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-emerald-500" />
-                  <span>Adjustments Count</span>
-                </div>
-              </div>
+                return (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-bold text-slate-900">
+                            Monthly Compensation Trend
+                          </h3>
+                          {totalChangeM !== 0 && (
+                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${totalChangeM > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                              {totalChangeM > 0 ? `+${totalChangeM}M (+${totalChangePct}%)` : `${totalChangeM}M (${totalChangePct}%)`}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {firstPayroll > 0 && lastPayroll > 0 ? (
+                            <span>Run-rate: <strong className="text-slate-700 font-mono">${firstPayroll.toFixed(2)}M</strong> &rarr; <strong className="text-blue-700 font-mono">${lastPayroll.toFixed(2)}M/mo</strong></span>
+                          ) : (
+                            <span>Monthly compensation ($M) &bull; {period.period_label}</span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold">
+                        <span className="w-2 h-2 rounded-full bg-blue-600" />
+                        <span>USD ($M)</span>
+                      </div>
+                    </div>
+
+                    <div className="h-56 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart
+                          data={trendData}
+                          margin={{ top: 10, right: 15, left: -10, bottom: 5 }}
+                        >
+                          <defs>
+                            <linearGradient id="insightsPayrollGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#2563eb" stopOpacity={0.25} />
+                              <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                          <YAxis
+                            stroke="#94a3b8"
+                            fontSize={11}
+                            tickLine={false}
+                            domain={[
+                              (dataMin: number) => Number((Math.max(0, dataMin - 0.05)).toFixed(2)),
+                              (dataMax: number) => Number((dataMax + 0.05).toFixed(2))
+                            ]}
+                            tickFormatter={(v) => `$${Number(v).toFixed(2)}M`}
+                          />
+                          <Tooltip
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xl text-xs space-y-1.5 min-w-[170px]">
+                                    <div className="font-bold text-slate-900 border-b border-slate-100 pb-1">
+                                      {label}
+                                    </div>
+                                    <div className="flex justify-between gap-3">
+                                      <span className="text-slate-500">Monthly Comp:</span>
+                                      <span className="font-bold text-blue-700 font-mono">${data.payroll_m}M USD</span>
+                                    </div>
+                                    {data.increase_k > 0 && (
+                                      <div className="flex justify-between gap-3 text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                                        <span>Cycle Increase:</span>
+                                        <span className="font-semibold text-emerald-700 font-mono">+${data.increase_k}k/yr</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="payroll_m"
+                            stroke="#2563eb"
+                            strokeWidth={2.5}
+                            fillOpacity={1}
+                            fill="url(#insightsPayrollGradient)"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={period.trend_points.map((pt) => ({
-                    label: pt.date_label,
-                    payroll_m: Number((pt.payroll_usd / 1000000).toFixed(2)),
-                    adjustments: pt.salary_adjustments_count,
-                    increase_k: Math.round(pt.total_increase_usd / 1000),
-                    avg_pct: pt.avg_adjustment_pct
-                  }))}
-                  margin={{ top: 10, right: 10, left: -10, bottom: 10 }}
-                >
-                  <defs>
-                    <linearGradient id="insightsPayrollGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} tickFormatter={(v) => `$${v}M`} />
-                  <Tooltip
-                    content={({ active, payload, label }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xl text-xs space-y-1.5">
-                            <div className="font-bold text-slate-900 border-b border-slate-100 pb-1">
-                              {label}
-                            </div>
-                            <div className="flex justify-between gap-4">
-                              <span className="text-slate-500">Monthly Payroll:</span>
-                              <span className="font-bold text-blue-700">${data.payroll_m}M USD</span>
-                            </div>
-                            <div className="flex justify-between gap-4">
-                              <span className="text-slate-500">Adjustments:</span>
-                              <span className="font-bold text-emerald-600">{data.adjustments} logged</span>
-                            </div>
-                            {data.increase_k > 0 && (
-                              <div className="flex justify-between gap-4">
-                                <span className="text-slate-500">Period Increase:</span>
-                                <span className="font-semibold text-slate-800">+${data.increase_k}k USD</span>
+            {/* Chart 2: Salary Adjustment Volume */}
+            <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <span>Salary Adjustment Volume</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Adjustment events count &bull; {period.period_label}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Adjustment Count</span>
+                </div>
+              </div>
+
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={period.trend_points.map((pt) => ({
+                      label: pt.date_label,
+                      adjustments: pt.salary_adjustments_count,
+                      avg_pct: pt.avg_adjustment_pct
+                    }))}
+                    margin={{ top: 10, right: 15, left: -15, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                    <YAxis
+                      stroke="#94a3b8"
+                      fontSize={11}
+                      tickLine={false}
+                      tickFormatter={(v) => `${v}`}
+                    />
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xl text-xs space-y-1.5 min-w-[170px]">
+                              <div className="font-bold text-slate-900 border-b border-slate-100 pb-1">
+                                {label}
                               </div>
-                            )}
-                            {data.avg_pct > 0 && (
-                              <div className="flex justify-between gap-4">
-                                <span className="text-slate-500">Avg Adjustment:</span>
-                                <span className="font-semibold text-slate-800">+{data.avg_pct}%</span>
+                              <div className="flex justify-between gap-3">
+                                <span className="text-slate-500">Adjustments:</span>
+                                <span className="font-bold text-emerald-700 font-mono">{data.adjustments} logged</span>
                               </div>
-                            )}
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="payroll_m"
-                    stroke="#2563eb"
-                    strokeWidth={2.5}
-                    fillOpacity={1}
-                    fill="url(#insightsPayrollGradient)"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="adjustments"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    dot={{ r: 4, fill: '#10b981' }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+                              {data.avg_pct > 0 && (
+                                <div className="flex justify-between gap-3 text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                                  <span>Avg Adjustment:</span>
+                                  <span className="font-semibold text-slate-800 font-mono">+{data.avg_pct}%</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar
+                      dataKey="adjustments"
+                      fill="#10b981"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
         </div>
@@ -811,12 +1035,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Graph 1: Wage Division */}
+            {/* Graph 1: Total Compensation by Department */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">Total Wage Division by Department</h3>
-                  <p className="text-xs text-slate-500">Total annual compensation expenditure ($M USD)</p>
+                  <h3 className="text-sm font-bold text-slate-900">Total Compensation by Department</h3>
+                  <p className="text-xs text-slate-500">Total annual compensation ($M USD)</p>
                 </div>
                 <span className="text-xs font-bold text-blue-600 font-mono">
                   ${(insights.overview.total_annual_compensation_usd / 1000000).toFixed(1)}M Total
@@ -890,7 +1114,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-900">
-                Departmental Expenditure Details &bull; As of {formattedAsOf}
+                Department Compensation Details &bull; As of {formattedAsOf}
               </span>
             </div>
             <div className="overflow-x-auto">

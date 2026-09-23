@@ -1,3 +1,23 @@
+export interface User {
+  id: number;
+  email: string;
+  full_name: string;
+  role: 'HR_MANAGER' | 'EMPLOYEE' | string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+}
+
+export interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  error: string | null;
+  login: (email: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+}
+
 export interface Department {
   id: number;
   name: string;
