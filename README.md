@@ -1,6 +1,31 @@
 # ACME Compensation & Workforce Intelligence Portal (SalaryFlow)
 
+[![Release](https://img.shields.io/badge/release-v1.0.0-blue.svg)](https://github.com)
+[![Tests](https://img.shields.io/badge/tests-36%20passed-success.svg)](https://github.com)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg?logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-38bdf8.svg?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Express](https://img.shields.io/badge/Express-4.21-000000.svg?logo=express&logoColor=white)](https://expressjs.com)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57.svg?logo=sqlite&logoColor=white)](https://sqlite.org)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A production-grade, full-stack multi-country compensation and workforce analytics management system built for dual-hub operations across the **United States (USD)** and **India (INR)**. The platform simulates and manages **10,000 workforce records** with localized statutory compensation, auditable salary histories, deterministic FX conversion, and role-based access control.
+
+---
+
+## GitHub Repository Tags & Topics
+
+Add these tags to your GitHub repository under **About → Edit repository details → Topics**:
+
+```text
+compensation-management, payroll, workforce-analytics, human-resources, hrms, salary-audit, react19, typescript, express, sqlite, tailwindcss, rbac, jwt-authentication, dual-currency, full-stack
+```
+
+### Categorized Tag Index:
+- **Domain & Function:** `compensation-management`, `payroll`, `workforce-analytics`, `human-resources`, `hrms`, `salary-audit`
+- **Frontend Stack:** `react19`, `typescript`, `tailwindcss`, `recharts`, `jspdf`
+- **Backend & Database:** `express`, `sqlite`, `sql-js`, `full-stack`
+- **Security & Multi-Tenant:** `rbac`, `jwt-authentication`, `bcrypt`, `dual-currency`
 
 ---
 
